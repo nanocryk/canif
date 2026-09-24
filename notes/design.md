@@ -94,18 +94,27 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - `CANIF_DIR`: the `.canif/` directory holding the running script (never one found from the cwd). Used to call other scripts and source libs: `source "$CANIF_DIR/_lib/common.sh"`.
 - `CANIF_PROJECT`: parent of `CANIF_DIR`. Used for project paths: `cd "$CANIF_PROJECT"`.
 - A script may call `canif run other/script ...` to get validation on the nested call.
-- stdout/stderr pass through; exit code is preserved.
+- Every inherited `CANIF_*` variable (case-insensitive) is removed before the script's own are set, so nested calls don't leak optional args.
+- On Windows, `CANIF_DIR`, `CANIF_PROJECT` and the script path given to the interpreter use forward slashes.
+- Interpreter invocation, program from config override or default:
+  - `.sh`: bash. On Windows, Git for Windows bash, never a bare `bash`.
+  - `.ps1`: `pwsh -NoProfile -NonInteractive -File <script>` (flags kept with an override).
+  - `.py`: `python` on Windows, `python3` elsewhere.
+  - config-added extension: `<program> <script> <args>`.
+- stdout/stderr pass through. canif exits with the script's exit code (1 if it has none, e.g. killed by a signal).
 
 ## CLI
 
-- `canif list [terms...]`: scripts matching any term in name or description; all scripts without terms. Plain text, no JSON.
-  - Grouped under one header line per origin directory.
-  - One line per script: usage line with choices inline, then description. `cargo/test <crate:core|cli> [--filter <filter>] [--release]  Run tests of one crate`
-- `canif show <name>`: full arg spec (patterns, ranges, help) and source path.
-- `canif run <name> [args...]`: validate, then exec.
-- `canif check`: validate all headers.
+- `canif list [terms...]`: scripts matching any term (case-insensitive substring) in name or description; all scripts without terms. Plain text, no JSON.
+  - One `<.canif path>:` header line per origin directory that has listed scripts.
+  - One line per script: `  <usage line>  # <description>`, e.g. `  cargo/test <crate:core|cli> [--filter <filter>] [--release]  # Run tests of one crate`.
+  - A script with an invalid header is listed as `  <name>  # invalid header, run canif check`.
+- `canif show <name>`: usage line, description, source path, then one line per arg: `arg <name>: <kind>, required|optional[, many][, help: ...]`.
+- `canif run <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`.
+- `canif check`: validate all headers. Header errors and name conflicts exit 1; unknown files are warnings.
 
 Errors:
+- canif's own errors go to stderr prefixed `canif: `, exit code 2. Errors parsing canif's own arguments keep clap's format.
 - Unknown script name: suggest the closest match.
 - Validation failure: print the failing arg, the rule it broke, and the script's usage line, so the agent fixes it in one retry.
 
