@@ -35,6 +35,9 @@ Aimed at AI agents, not humans: no interactive UI. Output is optimized to save a
 
 YAML inside a comment block fenced by `---` lines. Comment prefix `#` or `//` is stripped before parsing. Parsed with `serde-saphyr`.
 
+- The opening fence must be the first line, or the second after a shebang. A UTF-8 BOM is ignored.
+- A script without a header is an error: description and args are what agents rely on.
+
 ```sh
 #!/usr/bin/env bash
 # ---
@@ -56,7 +59,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - `args` is a map; key order is the positional order.
 - Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. Names mapping to the same env var are rejected.
 - Arg kind is inferred:
-  - `choices: [...]`: enum.
+  - `choices: [...]`: enum. A choice that call-time validation would reject (leading `-`, newline, NUL) is a header error.
   - `pattern: <regex>`: string matching the anchored regex.
   - `type: int`, with optional `min` / `max`.
   - `type: flag`: always optional and named (`--release`).
