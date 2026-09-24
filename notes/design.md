@@ -23,7 +23,8 @@ Aimed at AI agents, not humans: no interactive UI. Output is optimized to save a
 - Walk up from the caller's cwd collecting every `.canif/` directory, plus the user's `~/.canif` (`%USERPROFILE%\.canif` on Windows).
 - If the walk reaches home, `~/.canif` is counted once.
 - Name clashes: nearest directory wins.
-- `root: true` in a directory's config stops the walk there.
+- Same name twice inside one `.canif/` (e.g. `build.sh` and `build.ps1`): conflict, reported by `check`. The name is unusable, and it still hides the same name in farther directories.
+- `root: true` in a directory's config stops the walk there. `~/.canif` is still included.
 
 ## Config
 
