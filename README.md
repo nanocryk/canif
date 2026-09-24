@@ -4,6 +4,8 @@ Run reviewed scripts with validated arguments, so AI agents can be allowlisted o
 
 Scripts live in `.canif/` directories. Each declares its arguments in a header. The agent calls `canif run <script> <args>`; canif validates every value against the header before the script sees it. Review happens once, on the script, in git.
 
+![canif development as an MS Paint comic](comic.png)
+
 ## Install
 
 ```sh
