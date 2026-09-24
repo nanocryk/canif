@@ -3,11 +3,12 @@ use std::io;
 use std::path::Path;
 #[cfg(any(windows, test))]
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::binding::Bindings;
 use crate::config;
 use crate::discovery::{Origin, Script};
+use crate::output::{self, Trim};
 
 const ENV_PREFIX: &str = "CANIF_";
 const POWERSHELL_FLAGS: [&str; 3] = ["-NoProfile", "-NonInteractive", "-File"];
@@ -29,14 +30,18 @@ pub enum ExecError {
     InterpreterNotFound { program: String, extension: String },
     #[error("cannot start `{program}`: {source}")]
     Spawn { program: String, source: io::Error },
+    #[error("cannot wait for the script: {source}")]
+    Wait { source: io::Error },
 }
 
-/// Runs the script with inherited cwd and stdio, returning the exit code to propagate.
+/// Runs the script in the inherited cwd with its output relayed and logged, returning the exit code to propagate.
 pub fn run(
     script: &Script,
     origin: &Origin,
     config: &config::Config,
     bindings: &Bindings,
+    trim: Trim,
+    logs_dir: Option<&Path>,
 ) -> Result<i32, ExecError> {
     let program = interpreter(&script.extension, config)?;
     let mut command = Command::new(&program);
@@ -54,8 +59,10 @@ pub fn run(
     command
         .env("CANIF_DIR", portable_path(&origin.canif_dir))
         .env("CANIF_PROJECT", portable_path(&origin.project_dir))
-        .envs(bindings.env.iter().map(|(name, value)| (name, value)));
-    let status = command.status().map_err(|source| {
+        .envs(bindings.env.iter().map(|(name, value)| (name, value)))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let child = command.spawn().map_err(|source| {
         let program = program.to_string_lossy().into_owned();
         if source.kind() == io::ErrorKind::NotFound {
             ExecError::InterpreterNotFound {
@@ -66,6 +73,8 @@ pub fn run(
             ExecError::Spawn { program, source }
         }
     })?;
+    let status = output::relay(child, trim, logs_dir, &script.name)
+        .map_err(|source| ExecError::Wait { source })?;
     Ok(status.code().unwrap_or(1))
 }
 

@@ -116,6 +116,13 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - Trimming: `head` and `tail` from the header, overridden per call with options before the script name: `canif run --tail 80 cargo/test core`.
 - The full output of every run is written to `~/.canif/.logs/`. canif keeps the last 50 logs and deletes older ones on each `run`.
 - When output was trimmed, canif prints the log path so the agent can read the rest instead of re-running. Untrimmed runs print no path.
+- stdout and stderr are piped and read line by line (split on `\n`, bytes, a final unterminated line kept). Lines of both streams are merged in arrival order: that sequence is what `head` / `tail` count and what the log holds. Each printed line goes to the stream it came from.
+- canif returns when the script exits, not when its pipes close: a background process started by the script can hold them open. After exit, output is still relayed until no line arrives for 100ms.
+- On Windows the caller still waits for background processes a script leaves running: they inherit canif's own output handles.
+- `head` lines print live, `tail` lines at exit. Output that fits in `head` + `tail` prints whole.
+- Trimmed notice, on stderr where the gap is (after the head, before the tail): `canif: output trimmed (<dropped> of <total> lines), full log: <path>`, or `no log available` when there is no home or the log failed.
+- Log file: `<unix-millis, 20 digits>-<pid>-<name, / as _>.log`, merged lines only. Retention keeps the 50 names that sort last. A log write or prune failure prints one `canif: ` warning and never changes the exit code.
+- Header `output` values must be positive integers; 0, negatives and unknown keys are header errors. `show` prints `output: head <n>, tail <n>` (keys set only) after `source:` / `confirm:`.
 
 ## Miss log
 
@@ -132,7 +139,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
   - A `confirm: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [confirm] Deploy the app`.
 - `canif show <name>`: usage line (prefixed `canif confirm` for confirm scripts, `canif run` otherwise, as in validation errors), description, source path, `confirm: required` for confirm scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
 - `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`. Refuses `confirm: true` scripts and names `confirm`.
-- `canif confirm <name> [args...]`: same as `run`, for `confirm: true` scripts only; refuses any other script.
+- `canif confirm [--head <n>] [--tail <n>] <name> [args...]`: same as `run`, for `confirm: true` scripts only; refuses any other script.
 - `canif misses`: the miss log grouped by script name, with counts.
 - `canif check`: validate all headers. Header errors, name conflicts, unreadable entries and invalid configs exit 1; unknown files are warnings. It reports every problem instead of stopping at the first; other commands fail on the first discovery problem.
 - `canif guide`: script authoring reference (header format, arg kinds, env, config), compiled into the binary from `src/guide.md` so it is available wherever canif is installed. Its example is parsed by a unit test.

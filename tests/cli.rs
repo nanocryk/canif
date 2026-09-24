@@ -565,6 +565,288 @@ arg env: choices staging|prod, required
     assert!(!stdout(&output).contains("confirm"));
 }
 
+const COUNT: &str = "#!/usr/bin/env bash
+# ---
+# description: Print numbered lines
+# args:
+#   lines:
+#     type: int
+# ---
+for i in $(seq 1 \"$CANIF_LINES\"); do echo \"line $i\"; done
+";
+
+fn numbered(range: std::ops::RangeInclusive<usize>) -> String {
+    range.map(|index| format!("line {index}\n")).collect()
+}
+
+fn logs_dir(fixture: &Fixture) -> PathBuf {
+    fixture.home.join(".canif").join(".logs")
+}
+
+fn log_files(fixture: &Fixture) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(logs_dir(fixture))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// The log path from the trimmed notice, checked against the notice format.
+fn trimmed_log_path(stderr_text: &str, dropped: usize, total: usize) -> PathBuf {
+    let prefix = format!("canif: output trimmed ({dropped} of {total} lines), full log: ");
+    let line = stderr_text
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("no trimmed notice in {stderr_text:?}"));
+    PathBuf::from(&line[prefix.len()..])
+}
+
+#[test]
+fn untrimmed_output_is_unchanged_and_logged() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/count.sh", COUNT);
+    fixture.write(
+        ".canif/partial.sh",
+        "# ---\n# description: x\n# ---\nprintf 'a\\n\\xff\\nb'\n",
+    );
+    let output = fixture.canif(&["run", "count", "3"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), numbered(1..=3));
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+
+    let output = fixture.canif(&["run", "partial"]);
+    assert_eq!(output.stdout, b"a\n\xff\nb");
+    let logs = log_files(&fixture);
+    assert_eq!(logs.len(), 2);
+    let log_ending = |suffix: &str| {
+        let path = logs
+            .iter()
+            .find(|path| path.to_string_lossy().ends_with(suffix))
+            .unwrap_or_else(|| panic!("no {suffix} in {logs:?}"));
+        fs::read(path).unwrap()
+    };
+    assert_eq!(log_ending("-count.log"), numbered(1..=3).as_bytes());
+    assert_eq!(log_ending("-partial.log"), b"a\n\xff\nb");
+}
+
+#[test]
+fn header_tail_trims_and_prints_the_log_path() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/sub/count.sh",
+        &COUNT.replace("# args:", "# output: {tail: 3}\n# args:"),
+    );
+    let output = fixture.canif(&["run", "sub/count", "20"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), numbered(18..=20));
+    let log = trimmed_log_path(&stderr(&output), 17, 20);
+    assert_eq!(log.parent().unwrap(), logs_dir(&fixture));
+    let name = log.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(name.ends_with("-sub_count.log"), "{name}");
+    assert_eq!(fs::read_to_string(&log).unwrap(), numbered(1..=20));
+
+    let output = fixture.canif(&["run", "sub/count", "3"]);
+    assert_eq!(stdout(&output), numbered(1..=3));
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+}
+
+#[test]
+fn cli_head_overrides_header_and_keeps_its_tail() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/count.sh",
+        &COUNT.replace("# args:", "# output: {head: 1, tail: 2}\n# args:"),
+    );
+    let output = fixture.canif(&["run", "--head", "3", "count", "10"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let mut expected = numbered(1..=3);
+    expected.push_str(&numbered(9..=10));
+    assert_eq!(stdout(&output), expected);
+    trimmed_log_path(&stderr(&output), 5, 10);
+
+    let output = fixture.canif(&["run", "--head", "3", "--tail", "4", "count", "6"]);
+    assert_eq!(stdout(&output), numbered(1..=6));
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+}
+
+#[test]
+fn confirm_accepts_trim_options() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["confirm", "--tail", "5", "deploy/prod", "staging"]);
+    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "deploying staging\n");
+}
+
+#[test]
+fn stderr_lines_stay_on_stderr() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/mixed.sh",
+        "# ---\n# description: x\n# output: {head: 1, tail: 1}\n# ---\necho out1\necho err1 >&2\necho out2\necho err2 >&2\nexit 5\n",
+    );
+    let output = fixture.canif(&["run", "mixed"]);
+    assert_eq!(output.status.code(), Some(5));
+    let out = stdout(&output);
+    let err = stderr(&output);
+    assert!(!out.contains("err"), "{out}");
+    assert!(out.lines().all(|line| line.starts_with("out")), "{out}");
+    let log = trimmed_log_path(&err, 2, 4);
+    let script_err: Vec<&str> = err
+        .lines()
+        .filter(|line| !line.starts_with("canif: "))
+        .collect();
+    assert!(
+        script_err.iter().all(|line| line.starts_with("err")),
+        "{err}"
+    );
+    let mut logged: Vec<String> = fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    logged.sort();
+    assert_eq!(logged, ["err1", "err2", "out1", "out2"]);
+
+    let output = fixture.canif(&["run", "--head", "4", "mixed"]);
+    assert_eq!(stdout(&output), "out1\nout2\n");
+    assert_eq!(stderr(&output), "err1\nerr2\n");
+}
+
+#[test]
+fn run_keeps_the_newest_50_logs() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/count.sh", COUNT);
+    for index in 0..55 {
+        write(
+            &logs_dir(&fixture),
+            &format!("{index:020}-1-old.log"),
+            "old\n",
+        );
+    }
+    write(&logs_dir(&fixture), "keep.txt", "not a log\n");
+    let output = fixture.canif(&["run", "count", "1"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    let logs = log_files(&fixture);
+    assert_eq!(logs.len(), 51);
+    assert!(logs.contains(&logs_dir(&fixture).join("keep.txt")));
+    assert!(!logs.contains(&logs_dir(&fixture).join(format!("{:020}-1-old.log", 5))));
+    assert!(logs.contains(&logs_dir(&fixture).join(format!("{:020}-1-old.log", 6))));
+    let newest = logs
+        .iter()
+        .find(|path| path.to_string_lossy().ends_with("-count.log"))
+        .unwrap();
+    assert_eq!(fs::read_to_string(newest).unwrap(), "line 1\n");
+}
+
+#[test]
+fn unwritable_log_warns_once_and_runs() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/count.sh",
+        &COUNT.replace("# args:", "# output: {tail: 1}\n# args:"),
+    );
+    // A file where the logs directory should be makes every log write fail.
+    write(&fixture.home, ".canif/.logs", "");
+    let output = fixture.canif(&["run", "count", "3"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "line 3\n");
+    let err = stderr(&output);
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(lines.len(), 2, "{err}");
+    assert!(lines[0].starts_with("canif: cannot write log "), "{err}");
+    assert_eq!(
+        lines[1],
+        "canif: output trimmed (2 of 3 lines), no log available"
+    );
+}
+
+#[test]
+fn show_prints_output_trimming() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/count.sh",
+        &COUNT.replace("# args:", "# output: {tail: 3, head: 2}\n# args:"),
+    );
+    fixture.write(
+        ".canif/tail.sh",
+        &COUNT.replace("# args:", "# output: {tail: 3}\n# args:"),
+    );
+    let output = fixture.canif(&["show", "count"]);
+    let expected = format!(
+        "usage: canif run count <lines>
+description: Print numbered lines
+source: {}
+output: head 2, tail 3
+arg lines: int, required
+",
+        fixture.canif_dir().join("count.sh").display()
+    );
+    assert_eq!(stdout(&output), expected);
+    let output = fixture.canif(&["show", "tail"]);
+    assert!(stdout(&output).contains("\noutput: tail 3\n"));
+}
+
+#[test]
+fn invalid_output_is_a_header_error() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/zero.sh",
+        &COUNT.replace("# args:", "# output: {head: 0}\n# args:"),
+    );
+    fixture.write(
+        ".canif/negative.sh",
+        &COUNT.replace("# args:", "# output: {tail: -2}\n# args:"),
+    );
+    fixture.write(
+        ".canif/unknown.sh",
+        &COUNT.replace("# args:", "# output: {lines: 2}\n# args:"),
+    );
+    let output = fixture.canif(&["check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let text = stdout(&output);
+    assert!(
+        text.contains("`output.head` must be a positive integer, got 0"),
+        "{text}"
+    );
+    assert!(
+        text.contains("`output.tail` must be a positive integer, got -2"),
+        "{text}"
+    );
+    assert!(text.ends_with("3 problems\n"), "{text}");
+
+    let output = fixture.canif(&["run", "zero", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn background_process_does_not_hold_the_run() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/spawn.sh",
+        "# ---\n# description: x\n# ---\nsleep 30 &\necho started\nexit 0\n",
+    );
+    // Files, not pipes: Windows passes canif's own inheritable handles on to `sleep`,
+    // so a piped `output()` would wait for `sleep` whatever canif does.
+    let stdout_path = fixture.home.join("stdout.txt");
+    let stderr_path = fixture.home.join("stderr.txt");
+    let started = std::time::Instant::now();
+    let status = fixture
+        .command(&["run", "spawn"])
+        .stdout(fs::File::create(&stdout_path).unwrap())
+        .stderr(fs::File::create(&stderr_path).unwrap())
+        .status()
+        .unwrap();
+    let elapsed = started.elapsed();
+    let stderr_text = fs::read_to_string(&stderr_path).unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr_text}");
+    assert_eq!(fs::read_to_string(&stdout_path).unwrap(), "started\n");
+    assert!(stderr_text.is_empty(), "{stderr_text}");
+    assert!(elapsed.as_secs() < 10, "took {elapsed:?}");
+}
+
 #[test]
 fn run_conflicted_name_fails() {
     let fixture = Fixture::new();

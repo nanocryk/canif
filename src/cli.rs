@@ -1,12 +1,14 @@
 use std::io;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 use crate::binding::{self, BindError};
 use crate::discovery::{self, Discovery, DiscoveryError, Script};
 use crate::exec::{self, ExecError};
 use crate::header::{self, ArgKind, ArgSpec, Arity, Confirm, Header, HeaderError, Presence};
+use crate::output::{LOGS_DIR, Trim};
 use crate::suggest;
 use crate::usage;
 
@@ -27,22 +29,43 @@ pub enum Action {
     /// Validate args against the script header, then run it.
     // Without this, a `--help` right after the name is taken by clap instead of the script.
     #[command(disable_help_flag = true)]
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
+    Run(Invocation),
     /// Same as `run`, for scripts whose header sets `confirm: true`.
     #[command(disable_help_flag = true)]
-    Confirm {
-        name: String,
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
+    Confirm(Invocation),
     /// Validate every script header and report conflicts.
     Check,
     /// Print the reference for writing scripts: header format, arg kinds, env, config.
     Guide,
+}
+
+#[derive(Debug, Args)]
+pub struct Invocation {
+    /// Print only the first <n> lines of output (overrides the header)
+    #[arg(long, value_name = "n")]
+    head: Option<NonZeroUsize>,
+    /// Print only the last <n> lines of output (overrides the header)
+    #[arg(long, value_name = "n")]
+    tail: Option<NonZeroUsize>,
+    /// Script name, then its args.
+    // One positional, so that options after the name (even `--head`) go to the script.
+    #[arg(
+        required = true,
+        value_name = "NAME [ARGS]",
+        trailing_var_arg = true,
+        allow_hyphen_values = true
+    )]
+    command: Vec<String>,
+}
+
+impl Invocation {
+    fn name(&self) -> &str {
+        &self.command[0]
+    }
+
+    fn args(&self) -> &[String] {
+        &self.command[1..]
+    }
 }
 
 pub const GUIDE: &str = include_str!("guide.md");
@@ -91,8 +114,8 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             print!("{}", show(script, &load_header(script)?));
             Ok(0)
         }
-        Action::Run { name, args } => run(&name, &args, Confirm::NotRequired),
-        Action::Confirm { name, args } => run(&name, &args, Confirm::Required),
+        Action::Run(invocation) => run(&invocation, Confirm::NotRequired),
+        Action::Confirm(invocation) => run(&invocation, Confirm::Required),
         Action::Check => {
             let report = check(&discover_all()?);
             print!("{}", report.text);
@@ -109,9 +132,9 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
 }
 
 /// Shared by `run` and `confirm`: `invoked` is the confirm level the subcommand serves.
-fn run(name: &str, args: &[String], invoked: Confirm) -> Result<i32, CliError> {
+fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
     let discovery = discover()?;
-    let script = find(&discovery, name)?;
+    let script = find(&discovery, invocation.name())?;
     let header = load_header(script)?;
     if header.confirm != invoked {
         return Err(CliError::WrongSubcommand {
@@ -119,9 +142,21 @@ fn run(name: &str, args: &[String], invoked: Confirm) -> Result<i32, CliError> {
             confirm: header.confirm,
         });
     }
-    let bindings = binding::bind(&script.name, &header, args)?;
+    let bindings = binding::bind(&script.name, &header, invocation.args())?;
     let origin = &discovery.origins[script.origin];
-    Ok(exec::run(script, origin, &discovery.config, &bindings)?)
+    let trim = header.output.overridden_by(Trim {
+        head: invocation.head,
+        tail: invocation.tail,
+    });
+    let logs_dir = std::env::home_dir().map(|home| home.join(discovery::DIR_NAME).join(LOGS_DIR));
+    Ok(exec::run(
+        script,
+        origin,
+        &discovery.config,
+        &bindings,
+        trim,
+        logs_dir.as_deref(),
+    )?)
 }
 
 /// Discovery that fails on the first unreadable entry or invalid config.
@@ -260,6 +295,13 @@ fn show(script: &Script, header: &Header) -> String {
     if header.confirm == Confirm::Required {
         lines.push("confirm: required".to_owned());
     }
+    let trim_parts: Vec<String> = [("head", header.output.head), ("tail", header.output.tail)]
+        .into_iter()
+        .filter_map(|(key, count)| count.map(|count| format!("{key} {count}")))
+        .collect();
+    if !trim_parts.is_empty() {
+        lines.push(format!("output: {}", trim_parts.join(", ")));
+    }
     for (name, spec) in &header.args {
         lines.push(format!("arg {name}: {}", arg_details(spec)));
     }
@@ -366,12 +408,41 @@ fn plural<'word>(count: usize, one: &'word str, many: &'word str) -> &'word str 
 mod tests {
     use super::*;
 
-    fn run_args(argv: &[&str]) -> (String, Vec<String>) {
+    fn run_invocation(argv: &[&str]) -> Invocation {
         let cli = Cli::try_parse_from(argv).unwrap();
-        let Action::Run { name, args } = cli.action else {
+        let Action::Run(invocation) = cli.action else {
             panic!("expected run");
         };
-        (name, args)
+        invocation
+    }
+
+    fn run_args(argv: &[&str]) -> (String, Vec<String>) {
+        let invocation = run_invocation(argv);
+        (invocation.name().to_owned(), invocation.args().to_vec())
+    }
+
+    #[test]
+    fn trim_options_come_before_the_name() {
+        let invocation = run_invocation(&["canif", "run", "--tail", "80", "--head=3", "x", "a"]);
+        assert_eq!(invocation.head, NonZeroUsize::new(3));
+        assert_eq!(invocation.tail, NonZeroUsize::new(80));
+        assert_eq!(invocation.name(), "x");
+        assert_eq!(invocation.args(), ["a"]);
+
+        let invocation = run_invocation(&["canif", "run", "x", "--head", "3"]);
+        assert_eq!(invocation.head, None);
+        assert_eq!(invocation.args(), ["--head", "3"]);
+
+        assert!(Cli::try_parse_from(["canif", "run", "--head", "3"]).is_err());
+
+        for bad in ["0", "-1", "abc"] {
+            assert!(Cli::try_parse_from(["canif", "run", "--head", bad, "x"]).is_err());
+        }
+        let cli = Cli::try_parse_from(["canif", "confirm", "--tail", "2", "x"]).unwrap();
+        let Action::Confirm(invocation) = cli.action else {
+            panic!("expected confirm");
+        };
+        assert_eq!(invocation.tail, NonZeroUsize::new(2));
     }
 
     #[test]
@@ -407,11 +478,11 @@ mod tests {
     #[test]
     fn confirm_parses_like_run() {
         let cli = Cli::try_parse_from(["canif", "confirm", "x", "--help"]).unwrap();
-        let Action::Confirm { name, args } = cli.action else {
+        let Action::Confirm(invocation) = cli.action else {
             panic!("expected confirm");
         };
-        assert_eq!(name, "x");
-        assert_eq!(args, ["--help"]);
+        assert_eq!(invocation.name(), "x");
+        assert_eq!(invocation.args(), ["--help"]);
     }
 
     #[test]

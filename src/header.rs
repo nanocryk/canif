@@ -1,8 +1,11 @@
+use std::num::NonZeroUsize;
+
 use indexmap::IndexMap;
 use regex::Regex;
 use serde::Deserialize;
 
 use crate::binding::{self, Rule};
+use crate::output::Trim;
 
 const COMMENT_PREFIXES: [&str; 2] = ["#", "//"];
 const FENCE: &str = "---";
@@ -11,6 +14,7 @@ const FENCE: &str = "---";
 pub struct Header {
     pub description: String,
     pub confirm: Confirm,
+    pub output: Trim,
     pub args: IndexMap<String, ArgSpec>,
 }
 
@@ -122,6 +126,8 @@ pub enum SpecError {
     RequiredDefault { arg: String },
     #[error("arg `{arg}`: invalid default: {rule}")]
     InvalidDefault { arg: String, rule: Rule },
+    #[error("`output.{key}` must be a positive integer, got {value}")]
+    InvalidOutput { key: &'static str, value: i64 },
 }
 
 #[derive(Deserialize)]
@@ -130,7 +136,15 @@ struct RawHeader {
     description: String,
     #[serde(default)]
     confirm: bool,
+    output: Option<RawOutput>,
     args: Option<IndexMap<String, RawArg>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutput {
+    head: Option<i64>,
+    tail: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -169,6 +183,13 @@ pub fn parse(source: &str) -> Result<Header, HeaderError> {
         args.insert(name, spec);
     }
     validate_many(&args)?;
+    let output = match raw.output {
+        Some(output) => Trim {
+            head: line_count("head", output.head)?,
+            tail: line_count("tail", output.tail)?,
+        },
+        None => Trim::default(),
+    };
     Ok(Header {
         description: fold(&raw.description),
         confirm: if raw.confirm {
@@ -176,8 +197,20 @@ pub fn parse(source: &str) -> Result<Header, HeaderError> {
         } else {
             Confirm::NotRequired
         },
+        output,
         args,
     })
+}
+
+fn line_count(key: &'static str, value: Option<i64>) -> Result<Option<NonZeroUsize>, SpecError> {
+    value
+        .map(|value| {
+            usize::try_from(value)
+                .ok()
+                .and_then(NonZeroUsize::new)
+                .ok_or(SpecError::InvalidOutput { key, value })
+        })
+        .transpose()
 }
 
 /// Collapses every run of whitespace or control chars to one space, so text fits one output line.
@@ -810,6 +843,42 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
             parse("# ---\n# description: x\n# confirm: maybe\n# ---\n"),
             Err(HeaderError::Yaml(_))
         ));
+    }
+
+    #[test]
+    fn output_trimming() {
+        let header = parse("# ---\n# description: x\n# ---\n").unwrap();
+        assert_eq!(header.output, Trim::default());
+        let header =
+            parse("# ---\n# description: x\n# output: {head: 5, tail: 20}\n# ---\n").unwrap();
+        assert_eq!(header.output.head, NonZeroUsize::new(5));
+        assert_eq!(header.output.tail, NonZeroUsize::new(20));
+        let header = parse("# ---\n# description: x\n# output:\n#   tail: 3\n# ---\n").unwrap();
+        assert_eq!(header.output.head, None);
+        assert_eq!(header.output.tail, NonZeroUsize::new(3));
+    }
+
+    #[test]
+    fn invalid_output() {
+        for (output, key, value) in [("{head: 0}", "head", 0), ("{tail: -3}", "tail", -3)] {
+            let source = format!("# ---\n# description: x\n# output: {output}\n# ---\n");
+            let result = parse(&source);
+            assert!(
+                matches!(
+                    &result,
+                    Err(HeaderError::Spec(SpecError::InvalidOutput { key: found, value: got }))
+                        if *found == key && *got == value
+                ),
+                "{output}: {result:?}"
+            );
+        }
+        for output in ["{head: abc}", "{lines: 3}", "5"] {
+            let source = format!("# ---\n# description: x\n# output: {output}\n# ---\n");
+            assert!(
+                matches!(parse(&source), Err(HeaderError::Yaml(_))),
+                "{output}"
+            );
+        }
     }
 
     #[test]

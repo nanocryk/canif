@@ -11,4 +11,5 @@ description: Use canif scripts instead of ad-hoc shell commands. TRIGGER before 
 - A description starting with `[confirm]` marks a risky script: call it with `canif confirm <name> <args>`, which prompts the user every time.
 - A validation error prints the broken rule and the usage line: fix the call and retry once. Values may not start with `-` (except ints) or contain newlines.
 - Never edit `.canif/` directly to make a call pass. When a script is missing or too narrow, propose a new or changed script to the user (`canif guide` prints the script format), then use it once added.
+- Trimmed output contains a `canif: output trimmed (...), full log: <path>` line: Read that file for the missing lines instead of re-running. `canif run --head <n> --tail <n> <name> ...` (options before the name) changes the trimming for one call.
 - `canif check` validates all headers after script changes.

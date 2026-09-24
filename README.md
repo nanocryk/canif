@@ -53,6 +53,7 @@ canif run cargo/test core --filter foo --release
 - Symlinked directories inside `.canif/` are not followed; symlinked files are scripts.
 - `description` and `help` are folded to one line, so YAML `|` / `>` blocks can wrap long text.
 - `confirm: true` in the header: the script runs only through `canif confirm <name> ...`, which is not allowlisted, so every call prompts. `canif run` refuses it and names the right command; `canif list` marks it `[confirm]`.
+- `output: {head: <n>, tail: <n>}` in the header (either key or both, positive integers): print only the first and/or last n lines of the script's output. See [Output](#output).
 
 ### Arguments
 
@@ -82,14 +83,23 @@ Options: `optional: true`, `named: true`, `many: true`, `help: ...`.
 ```
 canif list [terms...]   scripts with usage lines, filtered by name/description
 canif show <name>       full arg rules and source path
-canif run <name> ...    validate, then run
-canif confirm <name> ...
+canif run [--head <n>] [--tail <n>] <name> ...
+                        validate, then run
+canif confirm [--head <n>] [--tail <n>] <name> ...
                         same, for `confirm: true` scripts only
 canif check             validate every header and config, report conflicts and stray files
 canif guide             script authoring reference (header format, arg kinds, env, config)
 ```
 
 `canif guide` is the full reference for writing scripts; it ships inside the binary, so agents can read it anywhere canif is installed.
+
+### Output
+
+- stdout and stderr are relayed line by line, each line to the stream it came from. Trimming counts lines over both streams merged in arrival order.
+- `--head` / `--tail` go before the script name (`canif run --tail 80 cargo/test core`) and replace the header's value for that key. Everything after the name goes to the script.
+- `head` lines print live; `tail` lines print when the script exits. When both are set and the output fits, everything prints once.
+- Every run's full output is logged to `~/.canif/.logs/<unix-millis>-<pid>-<name>.log` (`/` in the name becomes `_`). The newest 50 logs are kept; older ones are deleted after each run.
+- When lines were dropped, canif prints `canif: output trimmed (<dropped> of <total> lines), full log: <path>` to stderr where the gap is. Untrimmed runs print no path. A log that cannot be written prints one `canif: ` warning and never fails the run.
 
 ## Example scripts
 

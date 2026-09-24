@@ -41,6 +41,7 @@ Called as: `canif run cargo/test core --filter foo --release`
 - Quote YAML values containing `: ` or starting with a special character: `'...'`.
 - Arg names match `[a-z][a-z0-9-]*`. Key order is the positional order.
 - `confirm: true`: the script only runs through `canif confirm <name> ...` (same args as `run`), which is not allowlisted, so every call prompts. `canif run` refuses it. Use for risky scripts (deploys, deletions).
+- `output: {head: <n>, tail: <n>}` (either key or both, positive): print only the first / last n lines of the merged stdout and stderr. The full output goes to a log under `~/.canif/.logs/`, whose path canif prints when lines were dropped. `canif run --head <n> --tail <n> <name> ...` overrides per call.
 
 ## Arg kinds (at most one per arg)
 
