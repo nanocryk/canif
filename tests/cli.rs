@@ -63,8 +63,14 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("home");
-        let project = root.path().join("project");
+        // The child reads its cwd back fully resolved (macOS resolves `/var` to `/private/var`).
+        // Windows is skipped: canonicalize adds a `\\?\` prefix there.
+        #[cfg(not(windows))]
+        let base = fs::canonicalize(root.path()).unwrap();
+        #[cfg(windows)]
+        let base = root.path().to_path_buf();
+        let home = base.join("home");
+        let project = base.join("project");
         fs::create_dir_all(&home).unwrap();
         let fixture = Self {
             _root: root,
