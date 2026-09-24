@@ -13,7 +13,9 @@ Aimed at AI agents, not humans: no interactive UI. Output is optimized to save a
 - Plain script files under a `.canif/` directory, runnable and lintable on their own.
 - Name = path relative to `.canif/` without extension: `.canif/cargo/test.sh` is `cargo/test`.
 - Files and directories starting with `.` or `_` are never scripts. `_lib/` holds helpers scripts can source.
-- Interpreter chosen from the file extension (`.sh` bash, `.ps1` pwsh, `.py` python, ...). Overridable per extension in config.
+- Interpreter chosen from the file extension: `.sh` bash, `.ps1` pwsh, `.py` python. Overridable per extension in config.
+- On Windows, `.sh` runs with Git for Windows bash (derived from `git --exec-path`, then standard install paths), never `System32\bash.exe` (WSL).
+- Files with an extension that has no interpreter are skipped by `list` and `run`, and reported by `check`.
 - Project scripts are tracked in git. Git history and commit review are the integrity check: no trust store, no hash pinning.
 
 ## Discovery
@@ -52,6 +54,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 - `description` is the only searchable text; no tags.
 - `args` is a map; key order is the positional order.
+- Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. Names mapping to the same env var are rejected.
 - Arg kind is inferred:
   - `choices: [...]`: enum.
   - `pattern: <regex>`: string matching the anchored regex.
@@ -63,7 +66,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 ## Arguments at call time
 
-- Required args are positional, optional args are named `--name value` (clap convention).
+- Required args are positional, optional args are named `--name value` or `--name=value` (clap convention).
 - At most one `many` arg per script, and only as the last positional: `canif run fmt/files a.rs b.rs`.
 - Rejected in every value: leading `-` (except `int` values, so `-5` is valid), newline, NUL.
 - No unvalidated rest args.
