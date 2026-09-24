@@ -25,12 +25,15 @@ pub enum Action {
     /// Show a script's usage, description, source path and arg rules.
     Show { name: String },
     /// Validate args against the script header, then run it.
+    // Without this, a `--help` right after the name is taken by clap instead of the script.
+    #[command(disable_help_flag = true)]
     Run {
         name: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
     /// Same as `run`, for scripts whose header sets `confirm: true`.
+    #[command(disable_help_flag = true)]
     Confirm {
         name: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -382,6 +385,10 @@ mod tests {
     fn run_passes_help_and_double_dash_to_the_script() {
         let (_, args) = run_args(&["canif", "run", "x", "-5", "--help", "--", "-h"]);
         assert_eq!(args, ["-5", "--help", "--", "-h"]);
+        let (_, args) = run_args(&["canif", "run", "x", "--help"]);
+        assert_eq!(args, ["--help"]);
+        let (_, args) = run_args(&["canif", "run", "x", "-h"]);
+        assert_eq!(args, ["-h"]);
     }
 
     #[test]
@@ -399,12 +406,12 @@ mod tests {
 
     #[test]
     fn confirm_parses_like_run() {
-        let cli = Cli::try_parse_from(["canif", "confirm", "x", "-5", "--help"]).unwrap();
+        let cli = Cli::try_parse_from(["canif", "confirm", "x", "--help"]).unwrap();
         let Action::Confirm { name, args } = cli.action else {
             panic!("expected confirm");
         };
         assert_eq!(name, "x");
-        assert_eq!(args, ["-5", "--help"]);
+        assert_eq!(args, ["--help"]);
     }
 
     #[test]
