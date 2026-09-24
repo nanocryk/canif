@@ -61,7 +61,6 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - `description` is the only searchable text; no tags.
 - `description` and `help` are folded to one line: every run of whitespace or control chars (newlines, tabs, NUL) becomes one space, ends trimmed. YAML block scalars (`|`, `>`) can wrap long text.
 - `confirm: true`: the script runs only through `canif confirm`, which stays off the allowlist so Claude Code prompts for every call.
-- `timeout: <seconds>`: canif kills the script past that duration.
 - `output: {head: <n>, tail: <n>}`: default trimming of the script's output (either key or both).
 - `args` is a map; key order is the positional order.
 - Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. The charset makes this mapping collision-free.
@@ -111,7 +110,6 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
   - `.py`: `py` (the Python launcher) on Windows, `python3` elsewhere.
   - config-added extension: `<program> <script> <args>`.
 - stdout/stderr pass through, trimmed per [Output](#output). canif exits with the script's exit code (1 if it has none, e.g. killed by a signal).
-- Timeout: canif kills the script, prints a message naming the timeout, and exits 124 (as `timeout(1)`), so a timeout is distinguishable from a failure.
 
 ## Output
 
