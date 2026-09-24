@@ -10,7 +10,24 @@ const FENCE: &str = "---";
 #[derive(Debug, Clone)]
 pub struct Header {
     pub description: String,
+    pub confirm: Confirm,
     pub args: IndexMap<String, ArgSpec>,
+}
+
+/// Whether the script runs through `canif confirm` (never allowlisted) instead of `canif run`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirm {
+    NotRequired,
+    Required,
+}
+
+impl Confirm {
+    pub fn subcommand(self) -> &'static str {
+        match self {
+            Self::NotRequired => "run",
+            Self::Required => "confirm",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +128,8 @@ pub enum SpecError {
 #[serde(deny_unknown_fields)]
 struct RawHeader {
     description: String,
+    #[serde(default)]
+    confirm: bool,
     args: Option<IndexMap<String, RawArg>>,
 }
 
@@ -152,6 +171,11 @@ pub fn parse(source: &str) -> Result<Header, HeaderError> {
     validate_many(&args)?;
     Ok(Header {
         description: fold(&raw.description),
+        confirm: if raw.confirm {
+            Confirm::Required
+        } else {
+            Confirm::NotRequired
+        },
         args,
     })
 }
@@ -771,6 +795,20 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
         assert!(matches!(
             spec_error("x:\n  type: flag\n  default: a"),
             SpecError::FlagDefault { .. }
+        ));
+    }
+
+    #[test]
+    fn confirm_defaults_to_not_required() {
+        let header = parse("# ---\n# description: x\n# ---\n").unwrap();
+        assert_eq!(header.confirm, Confirm::NotRequired);
+        let header = parse("# ---\n# description: x\n# confirm: false\n# ---\n").unwrap();
+        assert_eq!(header.confirm, Confirm::NotRequired);
+        let header = parse("# ---\n# description: x\n# confirm: true\n# ---\n").unwrap();
+        assert_eq!(header.confirm, Confirm::Required);
+        assert!(matches!(
+            parse("# ---\n# description: x\n# confirm: maybe\n# ---\n"),
+            Err(HeaderError::Yaml(_))
         ));
     }
 

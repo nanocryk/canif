@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use crate::binding::{self, BindError};
 use crate::discovery::{self, Discovery, DiscoveryError, Script};
 use crate::exec::{self, ExecError};
-use crate::header::{self, ArgKind, ArgSpec, Arity, Header, HeaderError, Presence};
+use crate::header::{self, ArgKind, ArgSpec, Arity, Confirm, Header, HeaderError, Presence};
 use crate::suggest;
 use crate::usage;
 
@@ -26,6 +26,12 @@ pub enum Action {
     Show { name: String },
     /// Validate args against the script header, then run it.
     Run {
+        name: String,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Same as `run`, for scripts whose header sets `confirm: true`.
+    Confirm {
         name: String,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -61,6 +67,8 @@ pub enum CliError {
         path: PathBuf,
         source: Box<HeaderError>,
     },
+    #[error("{}", wrong_subcommand_text(name, *confirm))]
+    WrongSubcommand { name: String, confirm: Confirm },
     #[error(transparent)]
     Bind(#[from] BindError),
     #[error(transparent)]
@@ -80,14 +88,8 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             print!("{}", show(script, &load_header(script)?));
             Ok(0)
         }
-        Action::Run { name, args } => {
-            let discovery = discover()?;
-            let script = find(&discovery, &name)?;
-            let header = load_header(script)?;
-            let bindings = binding::bind(&script.name, &header, &args)?;
-            let origin = &discovery.origins[script.origin];
-            Ok(exec::run(script, origin, &discovery.config, &bindings)?)
-        }
+        Action::Run { name, args } => run(&name, &args, Confirm::NotRequired),
+        Action::Confirm { name, args } => run(&name, &args, Confirm::Required),
         Action::Check => {
             let report = check(&discover_all()?);
             print!("{}", report.text);
@@ -101,6 +103,22 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             Ok(0)
         }
     }
+}
+
+/// Shared by `run` and `confirm`: `invoked` is the confirm level the subcommand serves.
+fn run(name: &str, args: &[String], invoked: Confirm) -> Result<i32, CliError> {
+    let discovery = discover()?;
+    let script = find(&discovery, name)?;
+    let header = load_header(script)?;
+    if header.confirm != invoked {
+        return Err(CliError::WrongSubcommand {
+            name: script.name.clone(),
+            confirm: header.confirm,
+        });
+    }
+    let bindings = binding::bind(&script.name, &header, args)?;
+    let origin = &discovery.origins[script.origin];
+    Ok(exec::run(script, origin, &discovery.config, &bindings)?)
 }
 
 /// Discovery that fails on the first unreadable entry or invalid config.
@@ -162,6 +180,16 @@ fn unknown_script_text(name: &str, suggestion: Option<&str>) -> String {
     }
 }
 
+fn wrong_subcommand_text(name: &str, confirm: Confirm) -> String {
+    let command = format!("canif {} {name}", confirm.subcommand());
+    match confirm {
+        Confirm::Required => format!("script `{name}` has `confirm: true`, run `{command}`"),
+        Confirm::NotRequired => {
+            format!("script `{name}` does not have `confirm: true`, run `{command}`")
+        }
+    }
+}
+
 fn joined_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -194,8 +222,12 @@ fn list(discovery: &Discovery, terms: &[String]) -> String {
             }
             lines.push(match &header {
                 Some(header) => format!(
-                    "  {}  # {}",
+                    "  {}  # {}{}",
                     usage::line(&script.name, header),
+                    match header.confirm {
+                        Confirm::Required => "[confirm] ",
+                        Confirm::NotRequired => "",
+                    },
                     header.description
                 ),
                 None => format!("  {}  # invalid header, run canif check", script.name),
@@ -218,10 +250,13 @@ fn list(discovery: &Discovery, terms: &[String]) -> String {
 
 fn show(script: &Script, header: &Header) -> String {
     let mut lines = vec![
-        format!("usage: canif run {}", usage::line(&script.name, header)),
+        format!("usage: {}", usage::command(&script.name, header)),
         format!("description: {}", header.description),
         format!("source: {}", script.path.display()),
     ];
+    if header.confirm == Confirm::Required {
+        lines.push("confirm: required".to_owned());
+    }
     for (name, spec) in &header.args {
         lines.push(format!("arg {name}: {}", arg_details(spec)));
     }
@@ -359,6 +394,28 @@ mod tests {
         assert_eq!(
             usage::line("cargo/test", &header),
             "cargo/test <crate:core|cli> [--filter <filter>] [--jobs <jobs>=4] [--release]"
+        );
+    }
+
+    #[test]
+    fn confirm_parses_like_run() {
+        let cli = Cli::try_parse_from(["canif", "confirm", "x", "-5", "--help"]).unwrap();
+        let Action::Confirm { name, args } = cli.action else {
+            panic!("expected confirm");
+        };
+        assert_eq!(name, "x");
+        assert_eq!(args, ["-5", "--help"]);
+    }
+
+    #[test]
+    fn wrong_subcommand_names_the_right_one() {
+        assert_eq!(
+            wrong_subcommand_text("deploy", Confirm::Required),
+            "script `deploy` has `confirm: true`, run `canif confirm deploy`"
+        );
+        assert_eq!(
+            wrong_subcommand_text("greet", Confirm::NotRequired),
+            "script `greet` does not have `confirm: true`, run `canif run greet`"
         );
     }
 

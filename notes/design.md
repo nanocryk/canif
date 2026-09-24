@@ -60,7 +60,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 - `description` is the only searchable text; no tags.
 - `description` and `help` are folded to one line: every run of whitespace or control chars (newlines, tabs, NUL) becomes one space, ends trimmed. YAML block scalars (`|`, `>`) can wrap long text.
-- `confirm: true`: the script runs only through `canif run-confirmed`, which stays off the allowlist so Claude Code prompts for every call.
+- `confirm: true`: the script runs only through `canif confirm`, which stays off the allowlist so Claude Code prompts for every call.
 - `timeout: <seconds>`: canif kills the script past that duration.
 - `output: {head: <n>, tail: <n>}`: default trimming of the script's output (either key or both).
 - `args` is a map; key order is the positional order.
@@ -131,10 +131,10 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
   - One `<.canif path>:` header line per origin directory that has listed scripts.
   - One line per script: `  <usage line>  # <description>`, e.g. `  cargo/test <crate:core|cli> [--filter <filter>] [--release]  # Run tests of one crate`.
   - A script with an invalid header is listed as `  <name>  # invalid header, run canif check`.
-  - A `confirm: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [run-confirmed] Deploy the app`.
-- `canif show <name>`: usage line, description, source path, `confirm: required` for confirm scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
-- `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`. Refuses `confirm: true` scripts and names `run-confirmed`.
-- `canif run-confirmed <name> [args...]`: same as `run`, for `confirm: true` scripts only; refuses any other script.
+  - A `confirm: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [confirm] Deploy the app`.
+- `canif show <name>`: usage line (prefixed `canif confirm` for confirm scripts, `canif run` otherwise, as in validation errors), description, source path, `confirm: required` for confirm scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
+- `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`. Refuses `confirm: true` scripts and names `confirm`.
+- `canif confirm <name> [args...]`: same as `run`, for `confirm: true` scripts only; refuses any other script.
 - `canif misses`: the miss log grouped by script name, with counts.
 - `canif check`: validate all headers. Header errors, name conflicts, unreadable entries and invalid configs exit 1; unknown files are warnings. It reports every problem instead of stopping at the first; other commands fail on the first discovery problem.
 - `canif guide`: script authoring reference (header format, arg kinds, env, config), compiled into the binary from `src/guide.md` so it is available wherever canif is installed. Its example is parsed by a unit test.
@@ -148,7 +148,7 @@ Errors:
 
 - README documents a settings snippet; canif never edits Claude Code settings itself.
   - allow: `Bash(canif run *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`, `Bash(canif misses)`
-  - `canif run-confirmed` is deliberately left out, so it always prompts.
+  - `canif confirm` is deliberately left out, so it always prompts. No subcommand may start with `run`: `Bash(canif run *)` is a plain prefix match and also approves `canif run-<anything>` (observed with `canif run-confirmed`).
   - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`. `Edit` rules cover every built-in file-editing tool; `**/` only matches under the current project.
 - Ask rules take precedence over allow rules and over `acceptEdits` mode; only `bypassPermissions` skips them.
 - Agents may read scripts and propose changes; writes go through user approval.
@@ -157,7 +157,3 @@ Errors:
 ## Stack
 
 Rust: `clap`, `serde`, `serde-saphyr`, `regex`.
-
-## Open
-
-- Verify that `Bash(canif run *)` does not match `canif run-confirmed ...`. If it does, the subcommand needs a name that doesn't start with `run`.

@@ -459,6 +459,112 @@ fn check_reports_invalid_default() {
     assert!(stderr(&output).contains("invalid default"));
 }
 
+const DEPLOY: &str = "#!/usr/bin/env bash
+# ---
+# description: Deploy the app
+# confirm: true
+# args:
+#   env:
+#     choices: [staging, prod]
+# ---
+echo \"deploying $CANIF_ENV\"
+exit 4
+";
+
+fn confirm_fixture() -> Fixture {
+    let fixture = Fixture::new();
+    fixture.write(".canif/deploy/prod.sh", DEPLOY);
+    fixture.write(".canif/greet.sh", GREET);
+    fixture
+}
+
+#[test]
+fn run_refuses_confirm_script_before_validation() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["run", "deploy/prod", "nope"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        stderr(&output).trim_end(),
+        "canif: script `deploy/prod` has `confirm: true`, run `canif confirm deploy/prod`"
+    );
+}
+
+#[test]
+fn confirm_refuses_other_scripts() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["confirm", "greet"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        stderr(&output).trim_end(),
+        "canif: script `greet` does not have `confirm: true`, run `canif run greet`"
+    );
+}
+
+#[test]
+fn confirm_runs_confirm_script() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["confirm", "deploy/prod", "staging"]);
+    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "deploying staging\n");
+}
+
+#[test]
+fn confirm_validation_failure_shows_its_usage() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["confirm", "deploy/prod", "dev"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output).replace("\r\n", "\n"),
+        "canif: arg `env`: `dev` is not one of staging|prod
+usage: canif confirm deploy/prod <env:staging|prod>
+"
+    );
+}
+
+#[test]
+fn confirm_unknown_name_suggests() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["confirm", "deploy/prd", "staging"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output).trim_end(),
+        "canif: unknown script `deploy/prd`, did you mean `deploy/prod`?"
+    );
+}
+
+#[test]
+fn list_and_show_mark_confirm_scripts() {
+    let fixture = confirm_fixture();
+    let output = fixture.canif(&["list"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let expected = format!(
+        "{}:
+  deploy/prod <env:staging|prod>  # [confirm] Deploy the app
+  greet  # Say hello from home
+",
+        fixture.canif_dir().display()
+    );
+    assert_eq!(stdout(&output), expected);
+
+    let output = fixture.canif(&["show", "deploy/prod"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let expected = format!(
+        "usage: canif confirm deploy/prod <env:staging|prod>
+description: Deploy the app
+source: {}
+confirm: required
+arg env: choices staging|prod, required
+",
+        fixture.canif_dir().join("deploy").join("prod.sh").display()
+    );
+    assert_eq!(stdout(&output), expected);
+
+    let output = fixture.canif(&["show", "greet"]);
+    assert!(!stdout(&output).contains("confirm"));
+}
+
 #[test]
 fn run_conflicted_name_fails() {
     let fixture = Fixture::new();

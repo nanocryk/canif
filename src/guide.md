@@ -40,6 +40,7 @@ Called as: `canif run cargo/test core --filter foo --release`
 - `description` and `help` are folded to one line (whitespace runs become one space), so `|` / `>` blocks can wrap long text.
 - Quote YAML values containing `: ` or starting with a special character: `'...'`.
 - Arg names match `[a-z][a-z0-9-]*`. Key order is the positional order.
+- `confirm: true`: the script only runs through `canif confirm <name> ...` (same args as `run`), which is not allowlisted, so every call prompts. `canif run` refuses it. Use for risky scripts (deploys, deletions).
 
 ## Arg kinds (at most one per arg)
 

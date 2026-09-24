@@ -19,6 +19,15 @@ pub fn line(script_name: &str, header: &Header) -> String {
     line
 }
 
+/// Full invocation with the subcommand the script's `confirm` requires.
+pub fn command(script_name: &str, header: &Header) -> String {
+    format!(
+        "canif {} {}",
+        header.confirm.subcommand(),
+        line(script_name, header)
+    )
+}
+
 fn placeholder(name: &str, spec: &ArgSpec) -> String {
     match &spec.kind {
         ArgKind::Choices(choices) => format!("<{name}:{}>", choices.join("|")),
@@ -113,6 +122,14 @@ mod tests {
             line("build", &header),
             "build [--count <count>=1] [--profile <profile:dev|release>=dev]"
         );
+    }
+
+    #[test]
+    fn command_names_the_required_subcommand() {
+        let header = header::parse("# ---\n# description: x\n# ---\n").unwrap();
+        assert_eq!(command("hello", &header), "canif run hello");
+        let header = header::parse("# ---\n# description: x\n# confirm: true\n# ---\n").unwrap();
+        assert_eq!(command("deploy", &header), "canif confirm deploy");
     }
 
     #[test]

@@ -61,7 +61,7 @@ impl fmt::Display for BindError {
         if let Some(arg) = &self.arg {
             write!(formatter, "arg `{arg}`: ")?;
         }
-        write!(formatter, "{}\nusage: canif run {}", self.rule, self.usage)
+        write!(formatter, "{}\nusage: {}", self.rule, self.usage)
     }
 }
 
@@ -76,7 +76,7 @@ pub fn bind(script_name: &str, header: &Header, raw: &[String]) -> Result<Bindin
     let fail = |arg: Option<&str>, rule: Rule| BindError {
         arg: arg.map(str::to_owned),
         rule,
-        usage: usage::line(script_name, header),
+        usage: usage::command(script_name, header),
     };
 
     let mut named: HashMap<&str, Provided> = HashMap::new();

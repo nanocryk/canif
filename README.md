@@ -52,6 +52,7 @@ canif run cargo/test core --filter foo --release
   A value containing `/` or `\` is a path: relative ones resolve against the `.canif/` holding the config. Bare names go through `PATH`.
 - Symlinked directories inside `.canif/` are not followed; symlinked files are scripts.
 - `description` and `help` are folded to one line, so YAML `|` / `>` blocks can wrap long text.
+- `confirm: true` in the header: the script runs only through `canif confirm <name> ...`, which is not allowlisted, so every call prompts. `canif run` refuses it and names the right command; `canif list` marks it `[confirm]`.
 
 ### Arguments
 
@@ -82,6 +83,8 @@ Options: `optional: true`, `named: true`, `many: true`, `help: ...`.
 canif list [terms...]   scripts with usage lines, filtered by name/description
 canif show <name>       full arg rules and source path
 canif run <name> ...    validate, then run
+canif confirm <name> ...
+                        same, for `confirm: true` scripts only
 canif check             validate every header and config, report conflicts and stray files
 canif guide             script authoring reference (header format, arg kinds, env, config)
 ```
@@ -125,7 +128,7 @@ Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
 }
 ```
 
-`Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule. Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
+`canif confirm` is deliberately left out of `allow`, so `confirm: true` scripts always prompt. `Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule. Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
 
 Install the agent skill by copying `skill/` to `~/.claude/skills/canif/`.
 
