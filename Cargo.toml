@@ -2,6 +2,22 @@
 name = "canif"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+description = "Run reviewed scripts with validated arguments, so AI agents can be allowlisted on one command"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nanocryk/canif"
+readme = "README.md"
+keywords = ["cli", "scripts", "ai-agents", "allowlist", "claude"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/skill",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+]
 
 [dependencies]
 anyhow = "1.0.104"

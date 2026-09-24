@@ -113,8 +113,7 @@ pub fn bind(script_name: &str, header: &Header, raw: &[String]) -> Result<Bindin
             let Some(value) = inline_value.or_else(|| tokens.next().map(String::as_str)) else {
                 return Err(fail(Some(name), Rule::MissingValue));
             };
-            check_value(spec, value).map_err(|rule| fail(Some(name), rule))?;
-            Provided::Value(value.to_owned())
+            Provided::Value(check_value(spec, value).map_err(|rule| fail(Some(name), rule))?)
         };
         named.insert(name, provided);
     }
@@ -133,10 +132,11 @@ pub fn bind(script_name: &str, header: &Header, raw: &[String]) -> Result<Bindin
         if values.is_empty() {
             return Err(fail(Some(name), Rule::Missing));
         }
-        for value in &values {
-            check_value(spec, value).map_err(|rule| fail(Some(name), rule))?;
-        }
-        positional_values.insert(name, values.into_iter().cloned().collect());
+        let checked = values
+            .into_iter()
+            .map(|value| check_value(spec, value).map_err(|rule| fail(Some(name), rule)))
+            .collect::<Result<Vec<_>, _>>()?;
+        positional_values.insert(name, checked);
     }
     if let Some(extra) = remaining.next() {
         let value = extra.clone();
@@ -173,7 +173,8 @@ pub fn bind(script_name: &str, header: &Header, raw: &[String]) -> Result<Bindin
     Ok(bindings)
 }
 
-fn check_value(spec: &ArgSpec, value: &str) -> Result<(), Rule> {
+/// Validates `value` and returns the form passed to the script (canonical decimal for ints).
+fn check_value(spec: &ArgSpec, value: &str) -> Result<String, Rule> {
     let owned = || value.to_owned();
     if value.contains(['\n', '\r', '\0']) {
         return Err(Rule::ForbiddenChar { value: owned() });
@@ -212,10 +213,11 @@ fn check_value(spec: &ArgSpec, value: &str) -> Result<(), Rule> {
                     max: *max,
                 });
             }
+            return Ok(number.to_string());
         }
         ArgKind::Flag | ArgKind::Text => {}
     }
-    Ok(())
+    Ok(owned())
 }
 
 fn shown(value: &str) -> String {
@@ -361,6 +363,18 @@ mod tests {
         );
         let inline = bind_args(args, &["--shift=-3", "-5"]).unwrap();
         assert_eq!(inline.env, bindings.env);
+    }
+
+    #[test]
+    fn int_passed_in_canonical_form() {
+        let args = "count:\n  type: int\nshift:\n  type: int\n  optional: true";
+        let bindings = bind_args(args, &["+5", "--shift=-007"]).unwrap();
+        assert_eq!(
+            bindings.env,
+            env(&[("CANIF_COUNT", "5"), ("CANIF_SHIFT", "-7")])
+        );
+        let many = bind_args("ids:\n  type: int\n  many: true", &["0008", "+1"]).unwrap();
+        assert_eq!(many.argv, tokens(&["8", "1"]));
     }
 
     #[test]

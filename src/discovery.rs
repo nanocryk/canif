@@ -16,6 +16,19 @@ pub struct Discovery {
     pub scripts: Vec<Script>,
     pub unknown: Vec<UnknownFile>,
     pub conflicts: Vec<Conflict>,
+    /// Unreadable entries and invalid configs; discovery carries on past them.
+    pub problems: Vec<DiscoveryError>,
+}
+
+impl Discovery {
+    /// Fails with the first problem, for commands that must not act on a partial view.
+    pub fn require_clean(mut self) -> Result<Self, DiscoveryError> {
+        if self.problems.is_empty() {
+            Ok(self)
+        } else {
+            Err(self.problems.remove(0))
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,16 +74,24 @@ pub enum DiscoveryError {
 struct Listing {
     candidates: BTreeMap<String, Vec<(PathBuf, String)>>,
     unknown: Vec<PathBuf>,
+    problems: Vec<DiscoveryError>,
 }
 
-pub fn discover(cwd: &Path, home: Option<&Path>) -> Result<Discovery, DiscoveryError> {
+pub fn discover(cwd: &Path, home: Option<&Path>) -> Discovery {
     discover_in(cwd.ancestors(), home)
 }
 
 fn discover_in<'path>(
     walk: impl IntoIterator<Item = &'path Path>,
     home: Option<&Path>,
-) -> Result<Discovery, DiscoveryError> {
+) -> Discovery {
+    let mut problems = Vec::new();
+    let mut load_config = |canif_dir: &Path| {
+        config::load(canif_dir).unwrap_or_else(|error| {
+            problems.push(DiscoveryError::Config(error));
+            config::DirConfig::default()
+        })
+    };
     let mut origins = Vec::new();
     let mut dir_configs = Vec::new();
     for project_dir in walk {
@@ -78,7 +99,7 @@ fn discover_in<'path>(
         if !canif_dir.is_dir() {
             continue;
         }
-        let dir_config = config::load(&canif_dir)?;
+        let dir_config = load_config(&canif_dir);
         let walk = dir_config.walk;
         dir_configs.push(dir_config);
         origins.push(Origin {
@@ -91,8 +112,8 @@ fn discover_in<'path>(
     }
     if let Some(home) = home {
         let canif_dir = home.join(DIR_NAME);
-        if canif_dir.is_dir() && !is_listed(&origins, &canif_dir)? {
-            dir_configs.push(config::load(&canif_dir)?);
+        if canif_dir.is_dir() && !is_listed(&origins, &canif_dir) {
+            dir_configs.push(load_config(&canif_dir));
             origins.push(Origin {
                 canif_dir,
                 project_dir: home.to_path_buf(),
@@ -107,7 +128,8 @@ fn discover_in<'path>(
     let mut conflicts = Vec::new();
     for (origin, Origin { canif_dir, .. }) in origins.iter().enumerate() {
         let mut listing = Listing::default();
-        list_dir(canif_dir, "", &config, &mut listing)?;
+        list_dir(canif_dir, "", &config, &mut listing);
+        problems.append(&mut listing.problems);
         unknown.extend(
             listing
                 .unknown
@@ -135,27 +157,26 @@ fn discover_in<'path>(
     }
     scripts.sort_by(|left, right| left.name.cmp(&right.name));
 
-    Ok(Discovery {
+    Discovery {
         origins,
         config,
         scripts,
         unknown,
         conflicts,
-    })
-}
-
-fn is_listed(origins: &[Origin], canif_dir: &Path) -> Result<bool, DiscoveryError> {
-    let target = canonicalize(canif_dir)?;
-    for origin in origins {
-        if canonicalize(&origin.canif_dir)? == target {
-            return Ok(true);
-        }
+        problems,
     }
-    Ok(false)
 }
 
-fn canonicalize(path: &Path) -> Result<PathBuf, DiscoveryError> {
-    fs::canonicalize(path).map_err(io_error(path))
+fn is_listed(origins: &[Origin], canif_dir: &Path) -> bool {
+    let target = canonicalize(canif_dir);
+    origins
+        .iter()
+        .any(|origin| canonicalize(&origin.canif_dir) == target)
+}
+
+/// Falls back to the path as given, so an uncanonicalizable dir compares by its spelling.
+fn canonicalize(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn io_error(path: &Path) -> impl FnOnce(io::Error) -> DiscoveryError {
@@ -165,19 +186,19 @@ fn io_error(path: &Path) -> impl FnOnce(io::Error) -> DiscoveryError {
     }
 }
 
-fn list_dir(
-    dir: &Path,
-    name_prefix: &str,
-    config: &config::Config,
-    listing: &mut Listing,
-) -> Result<(), DiscoveryError> {
-    let mut entries = fs::read_dir(dir)
-        .and_then(|entries| {
-            entries
-                .map(|entry| entry.map(|entry| entry.path()))
-                .collect::<io::Result<Vec<_>>>()
-        })
-        .map_err(io_error(dir))?;
+fn list_dir(dir: &Path, name_prefix: &str, config: &config::Config, listing: &mut Listing) {
+    let entries = fs::read_dir(dir).and_then(|entries| {
+        entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<io::Result<Vec<_>>>()
+    });
+    let mut entries = match entries {
+        Ok(entries) => entries,
+        Err(error) => {
+            listing.problems.push(io_error(dir)(error));
+            return;
+        }
+    };
     entries.sort();
     for path in entries {
         let Some(file_name) = path.file_name() else {
@@ -190,10 +211,21 @@ fn list_dir(
             listing.unknown.push(path);
             continue;
         };
-        let metadata = fs::metadata(&path).map_err(io_error(&path))?;
-        if metadata.is_dir() {
+        let link_metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                listing.problems.push(io_error(&path)(error));
+                continue;
+            }
+        };
+        let is_link = link_metadata.file_type().is_symlink();
+        // `fs::metadata` follows the link: a symlinked dir is skipped, a symlinked file is a script.
+        if is_link && fs::metadata(&path).is_ok_and(|target| target.is_dir()) {
+            continue;
+        }
+        if link_metadata.is_dir() {
             let prefix = format!("{name_prefix}{file_name}/");
-            list_dir(&path, &prefix, config, listing)?;
+            list_dir(&path, &prefix, config, listing);
             continue;
         }
         let file_name = Path::new(file_name);
@@ -214,7 +246,6 @@ fn list_dir(
             _ => listing.unknown.push(path),
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -231,7 +262,7 @@ mod tests {
         let walk = cwd
             .ancestors()
             .take_while(|dir| dir.starts_with(&boundary) && *dir != boundary);
-        discover_in(walk, home)
+        discover_in(walk, home).require_clean()
     }
 
     #[test]
@@ -239,7 +270,7 @@ mod tests {
         let tmp = fixture();
         touch(tmp.path(), ".canif/ok.sh");
         let cwd = mkdir(tmp.path(), "a/b");
-        let discovery = super::discover(&cwd, None).unwrap();
+        let discovery = super::discover(&cwd, None);
         assert_eq!(discovery.origins[0].project_dir, tmp.path());
     }
 
@@ -508,6 +539,69 @@ mod tests {
             matches!(result, Err(DiscoveryError::Config(_))),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn problems_are_collected_without_stopping() {
+        let tmp = fixture();
+        let outer = tmp.path().join("outer");
+        let inner = outer.join("inner");
+        let home = tmp.path().join("home");
+        write(&inner, ".canif/.config.yml", "bogus: 1\n");
+        touch(&inner, ".canif/near.sh");
+        write(&home, ".canif/.config.yml", "root: [\n");
+        touch(&outer, ".canif/far.sh");
+        let boundary = std::env::temp_dir();
+        let walk = inner
+            .ancestors()
+            .take_while(|dir| dir.starts_with(&boundary) && *dir != boundary);
+        let discovery = discover_in(walk, Some(&home));
+        assert_eq!(names(&discovery), ["far", "near"]);
+        assert_eq!(discovery.problems.len(), 2, "{:?}", discovery.problems);
+        assert!(
+            discovery
+                .problems
+                .iter()
+                .all(|problem| matches!(problem, DiscoveryError::Config(_)))
+        );
+        assert!(discovery.require_clean().is_err());
+    }
+
+    /// A link back to `.canif` would recurse forever if followed.
+    #[test]
+    fn symlinked_dirs_are_not_followed() {
+        let tmp = fixture();
+        touch(tmp.path(), ".canif/sub/ok.sh");
+        let canif = tmp.path().join(DIR_NAME);
+        let link = canif.join("sub").join("loop");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&canif, &link).unwrap();
+        // Junctions need no privilege, unlike Windows symlinks, and std reports both as symlinks.
+        #[cfg(windows)]
+        assert!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&canif)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let discovery = discover(tmp.path(), None).unwrap();
+        assert_eq!(names(&discovery), ["sub/ok"]);
+        assert!(discovery.unknown.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_files_are_scripts() {
+        let tmp = fixture();
+        touch(tmp.path(), ".canif/sub/ok.sh");
+        let canif = tmp.path().join(DIR_NAME);
+        std::os::unix::fs::symlink(canif.join("sub/ok.sh"), canif.join("alias.sh")).unwrap();
+        let discovery = discover(tmp.path(), None).unwrap();
+        assert_eq!(names(&discovery), ["alias", "sub/ok"]);
     }
 
     #[test]

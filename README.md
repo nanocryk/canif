@@ -41,13 +41,17 @@ canif run cargo/test core --filter foo --release
 - Header: YAML in a comment block fenced by `---`, first line of the file or right after the shebang. `#` and `//` comments work. Quote values containing `: ` or starting with a YAML special character (`'...'`).
 - Discovery: every `.canif/` from the cwd up, plus `~/.canif`. Nearest wins on name clashes. `root: true` in `.canif/.config.yml` stops the walk.
 - Names: path under `.canif/` without extension. Entries starting with `.` or `_` are not scripts (`_lib/` for shared helpers).
-- Interpreters: `.sh` bash (Git Bash on Windows), `.ps1` pwsh, `.py` python. Override or add in `.canif/.config.yml`:
+- Interpreters: `.sh` bash (Git Bash on Windows), `.ps1` pwsh, `.py` python3 (`py` launcher on Windows). Override or add in `.canif/.config.yml`:
 
   ```yaml
   interpreters:
     sh: C:/Program Files/Git/bin/bash.exe
     js: node
   ```
+
+  A value containing `/` or `\` is a path: relative ones resolve against the `.canif/` holding the config. Bare names go through `PATH`.
+- Symlinked directories inside `.canif/` are not followed; symlinked files are scripts.
+- `description` and `help` are folded to one line, so YAML `|` / `>` blocks can wrap long text.
 
 ### Arguments
 
@@ -68,7 +72,7 @@ Options: `optional: true`, `named: true`, `many: true`, `help: ...`.
 ### Script environment
 
 - Runs in the caller's cwd.
-- `CANIF_<NAME>` per arg (`dry-run` is `CANIF_DRY_RUN`), flags are `1` or unset. The `many` arg is also the script's argv (`"$@"`), and newline-joined in its env var.
+- `CANIF_<NAME>` per arg (`dry-run` is `CANIF_DRY_RUN`), flags are `1` or unset, ints in canonical form (`0008` is `8`). The `many` arg is also the script's argv (`"$@"`), and newline-joined in its env var.
 - `CANIF_DIR`: the `.canif/` holding the script. `CANIF_PROJECT`: its parent.
 - Inherited `CANIF_*` variables are cleared first. Exit code is the script's.
 
@@ -78,7 +82,7 @@ Options: `optional: true`, `named: true`, `many: true`, `help: ...`.
 canif list [terms...]   scripts with usage lines, filtered by name/description
 canif show <name>       full arg rules and source path
 canif run <name> ...    validate, then run
-canif check             validate every header, report conflicts and stray files
+canif check             validate every header and config, report conflicts and stray files
 canif guide             script authoring reference (header format, arg kinds, env, config)
 ```
 
@@ -124,3 +128,7 @@ Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
 `Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule. Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
 
 Install the agent skill by copying `skill/` to `~/.claude/skills/canif/`.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.

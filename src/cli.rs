@@ -89,7 +89,7 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             Ok(exec::run(script, origin, &discovery.config, &bindings)?)
         }
         Action::Check => {
-            let report = check(&discover()?);
+            let report = check(&discover_all()?);
             print!("{}", report.text);
             Ok(match report.outcome {
                 Outcome::Clean => 0,
@@ -103,10 +103,16 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
     }
 }
 
+/// Discovery that fails on the first unreadable entry or invalid config.
 fn discover() -> Result<Discovery, CliError> {
+    Ok(discover_all()?.require_clean()?)
+}
+
+/// Discovery that keeps its problems, for `check` to report them all.
+fn discover_all() -> Result<Discovery, CliError> {
     let cwd = std::env::current_dir().map_err(CliError::CurrentDir)?;
     let home = std::env::home_dir();
-    Ok(discovery::discover(&cwd, home.as_deref())?)
+    Ok(discovery::discover(&cwd, home.as_deref()))
 }
 
 fn load_header(script: &Script) -> Result<Header, CliError> {
@@ -271,6 +277,10 @@ struct Report {
 fn check(discovery: &Discovery) -> Report {
     let mut lines = Vec::new();
     let mut problem_count = 0;
+    for problem in &discovery.problems {
+        lines.push(problem.to_string());
+        problem_count += 1;
+    }
     for script in &discovery.scripts {
         if let Err(error) = load_header(script) {
             lines.push(error.to_string());

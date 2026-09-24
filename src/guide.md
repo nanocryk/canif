@@ -3,7 +3,8 @@
 Scripts live in `.canif/` directories: every `.canif/` from the cwd up, plus `~/.canif`. Nearest wins on name clashes.
 Name = path under `.canif/` without extension: `.canif/cargo/test.sh` is `cargo/test`.
 Entries starting with `.` or `_` are not scripts: put shared helpers in `_lib/`.
-Interpreters: `.sh` bash (Git Bash on Windows), `.ps1` pwsh, `.py` python.
+Interpreters: `.sh` bash (Git Bash on Windows), `.ps1` pwsh, `.py` python3 (`py` launcher on Windows).
+Symlinked directories inside `.canif/` are not followed; symlinked files are scripts.
 
 ## Header
 
@@ -35,6 +36,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_JOBS:+-j "$CANI
 Called as: `canif run cargo/test core --filter foo --release`
 
 - `description` is required. It is what `canif list <terms>` searches.
+- `description` and `help` are folded to one line (whitespace runs become one space), so `|` / `>` blocks can wrap long text.
 - Quote YAML values containing `: ` or starting with a special character: `'...'`.
 - Arg names match `[a-z][a-z0-9-]*`. Key order is the positional order.
 
@@ -58,6 +60,7 @@ Required args without `named` are positional.
 ## Values
 
 Rejected everywhere: leading `-` (except ints), newline, carriage return, NUL. No `--` pass-through: every value the script receives was validated.
+Ints reach the script in canonical form: `+5` is `5`, `0008` is `8`.
 
 ## Script environment
 
@@ -76,7 +79,7 @@ interpreters:
   js: node          # makes .js files scripts
 ```
 
-Merged per key, nearer directory wins.
+Merged per key, nearer directory wins. An interpreter containing `/` or `\` is a path; relative ones resolve against the `.canif/` holding that config. Bare names go through `PATH`.
 
 ## After writing
 

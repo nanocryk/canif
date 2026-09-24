@@ -73,7 +73,7 @@ fn interpreter(extension: &str, config: &config::Config) -> Result<OsString, Exe
     match extension {
         "sh" => default_bash(),
         "ps1" => Ok("pwsh".into()),
-        "py" if cfg!(windows) => Ok("python".into()),
+        "py" if cfg!(windows) => Ok("py".into()),
         "py" => Ok("python3".into()),
         _ => Err(ExecError::NoInterpreter {
             extension: extension.to_owned(),

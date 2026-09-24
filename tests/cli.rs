@@ -359,6 +359,27 @@ fn check_failure() {
 }
 
 #[test]
+fn check_reports_invalid_config_and_keeps_going() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/broken.sh", BROKEN);
+    write(&fixture.home, ".canif/.config.yml", "bogus: 1\n");
+    let output = fixture.canif(&["check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let text = stdout(&output);
+    let home_config = fixture.home.join(".canif").join(".config.yml");
+    assert!(
+        text.starts_with(&format!("{}: invalid config", home_config.display())),
+        "{text}"
+    );
+    assert!(text.contains("broken.sh: missing header"), "{text}");
+    assert!(text.ends_with("\n2 problems\n"), "{text}");
+
+    let output = fixture.canif(&["list"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("invalid config"));
+}
+
+#[test]
 fn run_conflicted_name_fails() {
     let fixture = Fixture::new();
     fixture.write(".canif/build.sh", GREET);

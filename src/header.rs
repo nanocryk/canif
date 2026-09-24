@@ -140,9 +140,17 @@ pub fn parse(source: &str) -> Result<Header, HeaderError> {
     }
     validate_many(&args)?;
     Ok(Header {
-        description: raw.description,
+        description: fold(&raw.description),
         args,
     })
+}
+
+/// Collapses every run of whitespace or control chars to one space, so text fits one output line.
+fn fold(text: &str) -> String {
+    text.split(|character: char| character.is_whitespace() || character.is_control())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn env_name(arg_name: &str) -> String {
@@ -278,7 +286,7 @@ fn build_spec(name: &str, raw: RawArg) -> Result<ArgSpec, SpecError> {
             Form::Positional
         },
         arity: if raw.many { Arity::Many } else { Arity::Single },
-        help: raw.help,
+        help: raw.help.as_deref().map(fold),
     })
 }
 
@@ -582,6 +590,14 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
                 "{arg}"
             );
         }
+    }
+
+    #[test]
+    fn description_and_help_are_folded() {
+        let source = "# ---\n# description: |\n#   first line\n#   \tsecond  line\n# args:\n#   x:\n#     help: >\n#       wrapped\n#\n#       help\n# ---\n";
+        let header = parse(source).unwrap();
+        assert_eq!(header.description, "first line second line");
+        assert_eq!(header.args["x"].help.as_deref(), Some("wrapped help"));
     }
 
     #[test]

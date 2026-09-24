@@ -13,6 +13,7 @@ Aimed at AI agents, not humans: no interactive UI. Output is optimized to save a
 - Plain script files under a `.canif/` directory, runnable and lintable on their own.
 - Name = path relative to `.canif/` without extension: `.canif/cargo/test.sh` is `cargo/test`.
 - Files and directories starting with `.` or `_` are never scripts. `_lib/` holds helpers scripts can source.
+- Symlinked directories inside `.canif/` are not followed (no loops, no scanning outside the tree). Symlinked files are scripts like any other.
 - Interpreter chosen from the file extension: `.sh` bash, `.ps1` pwsh, `.py` python. Overridable per extension in config.
 - On Windows, `.sh` runs with Git for Windows bash (derived from `git --exec-path`, then standard install paths), never `System32\bash.exe` (WSL).
 - Files with an extension that has no interpreter are skipped by `list` and `run`, and reported by `check`.
@@ -31,6 +32,7 @@ Aimed at AI agents, not humans: no interactive UI. Output is optimized to save a
 - File: `.canif/.config.yml`. Dot prefix guarantees it never clashes with a script.
 - Merged per key across all discovered directories; nearer overrides farther.
 - Keys: `root: true`, interpreter path per extension (e.g. an explicit Git Bash path on Windows).
+- An interpreter value containing `/` or `\` is a path: relative ones resolve against the `.canif/` directory holding that config. Bare names (`node`) go through `PATH`.
 
 ## Header
 
@@ -57,6 +59,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 ```
 
 - `description` is the only searchable text; no tags.
+- `description` and `help` are folded to one line: every run of whitespace or control chars (newlines, tabs, NUL) becomes one space, ends trimmed. YAML block scalars (`|`, `>`) can wrap long text.
 - `args` is a map; key order is the positional order.
 - Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. The charset makes this mapping collision-free.
 - Arg kind is inferred:
@@ -79,6 +82,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 - Values never reach the script source.
 - Scalar args: env var `CANIF_<NAME>` only. Flags are `1` or unset.
+- `int` values are passed in canonical decimal form: `+5` becomes `5`, `0008` becomes `8`.
 - The `many` arg: script argv (`"$@"` in bash, `$args` in PowerShell), and env var `CANIF_<NAME>` newline-joined.
 
 ## Globs
@@ -99,7 +103,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - Interpreter invocation, program from config override or default:
   - `.sh`: bash. On Windows, Git for Windows bash, never a bare `bash`.
   - `.ps1`: `pwsh -NoProfile -NonInteractive -File <script>` (flags kept with an override).
-  - `.py`: `python` on Windows, `python3` elsewhere.
+  - `.py`: `py` (the Python launcher) on Windows, `python3` elsewhere.
   - config-added extension: `<program> <script> <args>`.
 - stdout/stderr pass through. canif exits with the script's exit code (1 if it has none, e.g. killed by a signal).
 
@@ -111,7 +115,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
   - A script with an invalid header is listed as `  <name>  # invalid header, run canif check`.
 - `canif show <name>`: usage line, description, source path, then one line per arg: `arg <name>: <kind>, required|optional[, many][, help: ...]`.
 - `canif run <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`.
-- `canif check`: validate all headers. Header errors and name conflicts exit 1; unknown files are warnings.
+- `canif check`: validate all headers. Header errors, name conflicts, unreadable entries and invalid configs exit 1; unknown files are warnings. It reports every problem instead of stopping at the first; other commands fail on the first discovery problem.
 - `canif guide`: script authoring reference (header format, arg kinds, env, config), compiled into the binary from `src/guide.md` so it is available wherever canif is installed. Its example is parsed by a unit test.
 
 Errors:

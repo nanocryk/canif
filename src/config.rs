@@ -78,7 +78,10 @@ pub fn load(canif_dir: &Path) -> Result<DirConfig, ConfigError> {
             return Err(ConfigError::InvalidExtension { path, extension });
         }
         if interpreters
-            .insert(extension.to_ascii_lowercase(), program)
+            .insert(
+                extension.to_ascii_lowercase(),
+                resolve_program(canif_dir, program),
+            )
             .is_some()
         {
             return Err(ConfigError::DuplicateExtension { path, extension });
@@ -88,6 +91,17 @@ pub fn load(canif_dir: &Path) -> Result<DirConfig, ConfigError> {
         walk: if raw.root { Walk::Stop } else { Walk::Continue },
         interpreters,
     })
+}
+
+/// A program containing a path separator is a path, relative to the `.canif` dir that configured it.
+/// Bare names are left for `PATH` lookup.
+fn resolve_program(canif_dir: &Path, program: String) -> String {
+    let path = Path::new(&program);
+    let is_path = program.contains(['/', '\\']);
+    if !is_path || path.is_absolute() || path.has_root() {
+        return program;
+    }
+    canif_dir.join(path).to_string_lossy().into_owned()
 }
 
 impl Config {
@@ -149,13 +163,35 @@ mod tests {
     #[test]
     fn full_config() {
         let (_dir, result) =
-            load_text("root: true\ninterpreters:\n  SH: C:/Git/bin/bash.exe\n  js: node\n");
+            load_text("root: true\ninterpreters:\n  SH: /git/bin/bash.exe\n  js: node\n");
         let config = result.unwrap();
         assert_eq!(config.walk, Walk::Stop);
         assert_eq!(
             config.interpreters,
-            interpreters(&[("js", "node"), ("sh", "C:/Git/bin/bash.exe")])
+            interpreters(&[("js", "node"), ("sh", "/git/bin/bash.exe")])
         );
+    }
+
+    #[test]
+    fn relative_interpreter_paths_resolve_against_canif_dir() {
+        let (dir, result) =
+            load_text("interpreters:\n  sh: tools/bash\n  js: node\n  py: ./py/run\n");
+        let config = result.unwrap();
+        let resolved = |relative: &str| dir.path().join(relative).to_string_lossy().into_owned();
+        assert_eq!(config.interpreters["sh"], resolved("tools/bash"));
+        assert_eq!(config.interpreters["py"], resolved("./py/run"));
+        assert_eq!(config.interpreters["js"], "node");
+    }
+
+    #[test]
+    fn rooted_interpreter_paths_are_kept() {
+        let (_dir, result) =
+            load_text("interpreters:\n  sh: /usr/bin/bash\n  ps1: C:/Tools/pwsh.exe\n");
+        let config = result.unwrap();
+        assert_eq!(config.interpreters["sh"], "/usr/bin/bash");
+        if cfg!(windows) {
+            assert_eq!(config.interpreters["ps1"], "C:/Tools/pwsh.exe");
+        }
     }
 
     #[test]
