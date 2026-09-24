@@ -58,7 +58,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 - `description` is the only searchable text; no tags.
 - `args` is a map; key order is the positional order.
-- Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. Names mapping to the same env var are rejected.
+- Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. The charset makes this mapping collision-free.
 - Arg kind is inferred:
   - `choices: [...]`: enum. A choice that call-time validation would reject (leading `-`, newline, NUL) is a header error.
   - `pattern: <regex>`: string matching the anchored regex.

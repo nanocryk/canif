@@ -23,7 +23,7 @@ pub struct ArgSpec {
 #[derive(Debug, Clone)]
 pub enum ArgKind {
     Choices(Vec<String>),
-    Pattern(Regex),
+    Pattern { regex: Regex, source: String },
     Int { min: Option<i64>, max: Option<i64> },
     Flag,
     Text,
@@ -226,7 +226,10 @@ fn build_spec(name: &str, raw: RawArg) -> Result<ArgSpec, SpecError> {
             }
             ArgKind::Choices(choices)
         }
-        (_, Some(pattern), _) => ArgKind::Pattern(compile_pattern(name, &pattern)?),
+        (_, Some(pattern), _) => ArgKind::Pattern {
+            regex: compile_pattern(name, &pattern)?,
+            source: pattern,
+        },
         (_, _, Some(RawType::Int)) => {
             if let (Some(min), Some(max)) = (raw.min, raw.max)
                 && min > max
@@ -370,9 +373,10 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
         assert_eq!(crate_arg.arity, Arity::Single);
 
         let filter = &header.args["filter"];
-        let ArgKind::Pattern(regex) = &filter.kind else {
+        let ArgKind::Pattern { regex, source } = &filter.kind else {
             panic!("filter should be a pattern");
         };
+        assert_eq!(source, "^[A-Za-z0-9_:]+$");
         assert!(regex.is_match("foo::bar"));
         assert!(!regex.is_match("foo bar"));
         assert_eq!(filter.presence, Presence::Optional);
@@ -605,7 +609,7 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
     #[test]
     fn pattern_is_anchored() {
         let header = parse(&header_with_args("x:\n  pattern: a+")).unwrap();
-        let ArgKind::Pattern(regex) = &header.args["x"].kind else {
+        let ArgKind::Pattern { regex, .. } = &header.args["x"].kind else {
             panic!("x should be a pattern");
         };
         assert!(regex.is_match("aaa"));
@@ -616,7 +620,7 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
     #[test]
     fn alternation_is_anchored_as_a_whole() {
         let header = parse(&header_with_args("x:\n  pattern: a|b")).unwrap();
-        let ArgKind::Pattern(regex) = &header.args["x"].kind else {
+        let ArgKind::Pattern { regex, .. } = &header.args["x"].kind else {
             panic!("x should be a pattern");
         };
         assert!(regex.is_match("a"));
