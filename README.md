@@ -77,7 +77,10 @@ canif list [terms...]   scripts with usage lines, filtered by name/description
 canif show <name>       full arg rules and source path
 canif run <name> ...    validate, then run
 canif check             validate every header, report conflicts and stray files
+canif guide             script authoring reference (header format, arg kinds, env, config)
 ```
+
+`canif guide` is the full reference for writing scripts; it ships inside the binary, so agents can read it anywhere canif is installed.
 
 ## Example scripts
 
@@ -104,16 +107,18 @@ Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
     "allow": [
       "Bash(canif run *)",
       "Bash(canif list*)",
-      "Bash(canif show *)"
+      "Bash(canif show *)",
+      "Bash(canif check)",
+      "Bash(canif guide)"
     ],
     "ask": [
       "Edit(**/.canif/**)",
-      "Write(**/.canif/**)"
+      "Edit(~/.canif/**)"
     ]
   }
 }
 ```
 
-Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
+`Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule. Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
 
 Install the agent skill by copying `skill/` to `~/.claude/skills/canif/`.

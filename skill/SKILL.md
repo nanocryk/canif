@@ -9,5 +9,5 @@ description: Use canif scripts instead of ad-hoc shell commands. TRIGGER before 
 - Each line is a usage line: `<name> <required> [--optional <value>] [--flag]  # description`. Choices show inline as `<arg:a|b>`. `canif show <name>` gives patterns, int ranges and help.
 - Call `canif run <name> <args>` exactly as the usage line says. Required args positional, optional ones `--name value`. A trailing `<arg>...` takes several values; shell globs are fine there.
 - A validation error prints the broken rule and the usage line: fix the call and retry once. Values may not start with `-` (except ints) or contain newlines.
-- Never edit `.canif/` directly to make a call pass. When a script is missing or too narrow, propose a new or changed script to the user (header format in the canif README), then use it once added.
+- Never edit `.canif/` directly to make a call pass. When a script is missing or too narrow, propose a new or changed script to the user (`canif guide` prints the script format), then use it once added.
 - `canif check` validates all headers after script changes.

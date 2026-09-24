@@ -112,6 +112,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - `canif show <name>`: usage line, description, source path, then one line per arg: `arg <name>: <kind>, required|optional[, many][, help: ...]`.
 - `canif run <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`.
 - `canif check`: validate all headers. Header errors and name conflicts exit 1; unknown files are warnings.
+- `canif guide`: script authoring reference (header format, arg kinds, env, config), compiled into the binary from `src/guide.md` so it is available wherever canif is installed. Its example is parsed by a unit test.
 
 Errors:
 - canif's own errors go to stderr prefixed `canif: `, exit code 2. Errors parsing canif's own arguments keep clap's format.
@@ -121,8 +122,8 @@ Errors:
 ## Claude Code integration
 
 - README documents a settings snippet; canif never edits Claude Code settings itself.
-  - allow: `Bash(canif run *)`, `Bash(canif list*)`, `Bash(canif show *)`
-  - ask: `Edit(**/.canif/**)`, `Write(**/.canif/**)`
+  - allow: `Bash(canif run *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`
+  - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`. `Edit` rules cover every built-in file-editing tool; `**/` only matches under the current project.
 - Ask rules take precedence over allow rules and over `acceptEdits` mode; only `bypassPermissions` skips them.
 - Agents may read scripts and propose changes; writes go through user approval.
 - A small agent-facing skill lives in the repo: run `canif list <terms>` before writing an ad-hoc command, plain `canif list` when exploring.

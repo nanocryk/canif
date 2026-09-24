@@ -32,7 +32,11 @@ pub enum Action {
     },
     /// Validate every script header and report conflicts.
     Check,
+    /// Print the reference for writing scripts: header format, arg kinds, env, config.
+    Guide,
 }
+
+pub const GUIDE: &str = include_str!("guide.md");
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
@@ -65,20 +69,19 @@ pub enum CliError {
 
 /// Runs the parsed command and returns the process exit code.
 pub fn execute(cli: Cli) -> Result<i32, CliError> {
-    let cwd = std::env::current_dir().map_err(CliError::CurrentDir)?;
-    let home = std::env::home_dir();
-    let discovery = discovery::discover(&cwd, home.as_deref())?;
     match cli.action {
         Action::List { terms } => {
-            print!("{}", list(&discovery, &terms));
+            print!("{}", list(&discover()?, &terms));
             Ok(0)
         }
         Action::Show { name } => {
+            let discovery = discover()?;
             let script = find(&discovery, &name)?;
             print!("{}", show(script, &load_header(script)?));
             Ok(0)
         }
         Action::Run { name, args } => {
+            let discovery = discover()?;
             let script = find(&discovery, &name)?;
             let header = load_header(script)?;
             let bindings = binding::bind(&script.name, &header, &args)?;
@@ -86,14 +89,24 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             Ok(exec::run(script, origin, &discovery.config, &bindings)?)
         }
         Action::Check => {
-            let report = check(&discovery);
+            let report = check(&discover()?);
             print!("{}", report.text);
             Ok(match report.outcome {
                 Outcome::Clean => 0,
                 Outcome::Problems => 1,
             })
         }
+        Action::Guide => {
+            print!("{GUIDE}");
+            Ok(0)
+        }
     }
+}
+
+fn discover() -> Result<Discovery, CliError> {
+    let cwd = std::env::current_dir().map_err(CliError::CurrentDir)?;
+    let home = std::env::home_dir();
+    Ok(discovery::discover(&cwd, home.as_deref())?)
 }
 
 fn load_header(script: &Script) -> Result<Header, CliError> {
@@ -321,6 +334,19 @@ mod tests {
     fn run_passes_help_and_double_dash_to_the_script() {
         let (_, args) = run_args(&["canif", "run", "x", "-5", "--help", "--", "-h"]);
         assert_eq!(args, ["-5", "--help", "--", "-h"]);
+    }
+
+    #[test]
+    fn guide_example_parses() {
+        let example = GUIDE
+            .split("```")
+            .nth(1)
+            .expect("guide has a fenced example");
+        let header = header::parse(example.trim_start()).unwrap();
+        assert_eq!(
+            usage::line("cargo/test", &header),
+            "cargo/test <crate:core|cli> [--filter <filter>] [--jobs <jobs>] [--release]"
+        );
     }
 
     #[test]
