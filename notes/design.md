@@ -89,6 +89,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 - canif never expands globs.
 - The calling shell (Claude Code's Bash tool is Git Bash, even on Windows) expands unquoted globs before canif runs, so they land in the `many` last positional. Commands are designed around that.
+- An unquoted glob in `canif run ...` does not trigger a Claude Code permission prompt under the `Bash(canif run *)` allow rule (observed with `canif run glob-probe src/*.rs`).
 - An unmatched glob reaches canif literally and goes through normal validation.
 - Scripts that need a file set compute it themselves (e.g. from `git diff`) rather than taking a pattern.
 
@@ -135,7 +136,3 @@ Errors:
 ## Stack
 
 Rust: `clap`, `serde`, `serde-saphyr`, `regex`.
-
-## Open
-
-- Whether Claude Code prompts on an unquoted glob in `canif run ...` under the allow rule: test once the binary exists.

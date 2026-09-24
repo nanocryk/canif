@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(windows, test))]
+use std::path::PathBuf;
 use std::process::Command;
 
 use crate::binding::Bindings;
@@ -12,6 +14,7 @@ const POWERSHELL_FLAGS: [&str; 3] = ["-NoProfile", "-NonInteractive", "-File"];
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
+    #[cfg(windows)]
     #[error(
         "Git Bash not found for .sh scripts, set `interpreters: {{ sh: <path to bash.exe> }}` in .canif/.config.yml"
     )]
@@ -114,6 +117,7 @@ fn find_git_bash() -> Option<PathBuf> {
 }
 
 /// Maps `git --exec-path` output (`<root>/mingw64/libexec/git-core`) to `<root>/bin/bash.exe`.
+#[cfg(any(windows, test))]
 pub fn git_bash_from_exec_path(exec_path: &str) -> Option<PathBuf> {
     let libexec = Path::new(exec_path.trim()).ancestors().find(|dir| {
         dir.file_name()

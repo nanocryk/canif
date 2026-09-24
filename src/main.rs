@@ -1,8 +1,17 @@
+mod binding;
+mod cli;
+mod config;
+mod discovery;
+mod exec;
+mod header;
+mod suggest;
+mod usage;
+
 use std::io::Write;
 
 use clap::Parser;
 
-use canif::cli::{self, Cli};
+use crate::cli::Cli;
 
 const CANIF_ERROR_CODE: i32 = 2;
 

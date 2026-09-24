@@ -4,7 +4,7 @@ Run reviewed scripts with validated arguments, so AI agents can be allowlisted o
 
 Scripts live in `.canif/` directories. Each declares its arguments in a header. The agent calls `canif run <script> <args>`; canif validates every value against the header before the script sees it. Review happens once, on the script, in git.
 
-![canif development as an MS Paint comic](comic.png)
+![canif development as an MS Paint comic](https://raw.githubusercontent.com/nanocryk/canif/main/comic.png)
 
 ## Install
 
@@ -66,7 +66,7 @@ canif run cargo/test core --filter foo --release
 Options: `optional: true`, `named: true`, `many: true`, `help: ...`.
 
 - Required args are positional, optional ones named: `--name value` or `--name=value`. `named: true` forces a required arg to be named.
-- One `many` arg at most, the last positional; it takes the remaining values (shell globs expand into it).
+- One `many` arg at most, the last positional; it takes the remaining values (shell globs expand into it). Unquoted globs don't trigger a Claude Code prompt under the `Bash(canif run *)` rule.
 - Every value is rejected if it starts with `-` (except ints), or contains a newline or NUL. Arg names match `[a-z][a-z0-9-]*`.
 
 ### Script environment
@@ -128,6 +128,14 @@ Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
 `Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule. Ask rules win over allow rules and over `acceptEdits` mode, so script changes always go through you. Scripts stay tracked in git: review them like code.
 
 Install the agent skill by copying `skill/` to `~/.claude/skills/canif/`.
+
+## Trust model
+
+canif validates arguments; it does not sandbox scripts. An allowlisted `canif run` executes any script discovery finds, with your permissions.
+
+- Discovery trusts every `.canif/` from the cwd up. In a cloned repo, its scripts run without a prompt and shadow same-named `~/.canif` scripts. Its `.canif/.config.yml` can also replace interpreters for every script, home ones included.
+- Review a repo's `.canif/` before running canif in it, and again after pulls. `root: true` stops the walk upward. Keep `~/.canif` script names unlikely to clash.
+- The `ask` rules above cover Claude Code's file-editing tools only. Any other allowlisted command that writes files (`git checkout`, `cp`, a script that writes files) can still change `.canif/`.
 
 ## License
 
