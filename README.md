@@ -79,6 +79,21 @@ canif run <name> ...    validate, then run
 canif check             validate every header, report conflicts and stray files
 ```
 
+## Example scripts
+
+`examples/global/` is a ready-made `~/.canif`: cargo scripts that print compact summaries instead of raw output, so agents stop wrapping cargo in `grep`/`awk` pipelines.
+
+```
+cargo/check [--package <package>] [--full]    one line per diagnostic, then counts
+cargo/clippy [--package <package>] [--full]   same, warnings denied
+cargo/fmt [--check]                           format, or list unformatted files
+cargo/test [--package <package>] [--filter <filter>] [--nocapture] [--full]
+                                              failures with panic messages, summed totals
+cargo/verify [--package <package>]            fmt check, clippy, tests; stops at the first failure
+```
+
+Install with `cp -r examples/global/. ~/.canif/`. Shared helpers live in `_lib/cargo.sh`.
+
 ## Claude Code setup
 
 Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
