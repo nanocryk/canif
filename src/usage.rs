@@ -38,7 +38,11 @@ fn named_part(name: &str, spec: &ArgSpec) -> String {
     if matches!(spec.kind, ArgKind::Flag) {
         return format!("[--{name}]");
     }
-    let part = format!("--{name} {}", placeholder(name, spec));
+    let mut part = format!("--{name} {}", placeholder(name, spec));
+    if let Some(default) = &spec.default {
+        part.push('=');
+        part.push_str(default);
+    }
     match spec.presence {
         Presence::Required => part,
         Presence::Optional => format!("[{part}]"),
@@ -97,6 +101,17 @@ mod tests {
         assert_eq!(
             line("build", &header),
             "build [--profile <profile:dev|release>]"
+        );
+    }
+
+    #[test]
+    fn defaults_follow_placeholder() {
+        let header = header_with_args(
+            "count:\n  type: int\n  optional: true\n  default: 1\nprofile:\n  choices: [dev, release]\n  optional: true\n  default: dev",
+        );
+        assert_eq!(
+            line("build", &header),
+            "build [--count <count>=1] [--profile <profile:dev|release>=dev]"
         );
     }
 

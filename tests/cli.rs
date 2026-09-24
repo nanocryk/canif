@@ -385,6 +385,80 @@ fn check_reports_invalid_config_and_keeps_going() {
     assert!(stderr(&output).contains("invalid config"));
 }
 
+const WITH_DEFAULTS: &str = "#!/usr/bin/env bash
+# ---
+# description: Echo defaults
+# args:
+#   count:
+#     type: int
+#     min: 1
+#     optional: true
+#     default: '03'
+#     help: Repeat count
+#   label:
+#     optional: true
+#     default: hi
+# ---
+echo \"count=$CANIF_COUNT label=$CANIF_LABEL\"
+";
+
+#[test]
+fn run_exports_defaults_and_given_values_win() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/defaults.sh", WITH_DEFAULTS);
+    let output = fixture.canif(&["run", "defaults"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "count=3 label=hi\n");
+
+    let output = fixture.canif(&["run", "defaults", "--count", "7", "--label=yo"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "count=7 label=yo\n");
+}
+
+#[test]
+fn show_and_list_print_defaults() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/defaults.sh", WITH_DEFAULTS);
+    let output = fixture.canif(&["show", "defaults"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let expected = format!(
+        "usage: canif run defaults [--count <count>=3] [--label <label>=hi]
+description: Echo defaults
+source: {}
+arg count: int >= 1, optional, default: 3, help: Repeat count
+arg label: text, optional, default: hi
+",
+        fixture.canif_dir().join("defaults.sh").display()
+    );
+    assert_eq!(stdout(&output), expected);
+
+    let output = fixture.canif(&["list"]);
+    assert!(
+        stdout(&output)
+            .contains("  defaults [--count <count>=3] [--label <label>=hi]  # Echo defaults\n")
+    );
+}
+
+#[test]
+fn check_reports_invalid_default() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".canif/bad.sh",
+        &WITH_DEFAULTS.replace("default: '03'", "default: 0"),
+    );
+    let output = fixture.canif(&["check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let text = stdout(&output);
+    assert!(
+        text.contains("arg `count`: invalid default: 0 is out of range, must be >= 1"),
+        "{text}"
+    );
+
+    let output = fixture.canif(&["run", "bad"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("invalid default"));
+}
+
 #[test]
 fn run_conflicted_name_fails() {
     let fixture = Fixture::new();

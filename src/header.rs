@@ -2,6 +2,8 @@ use indexmap::IndexMap;
 use regex::Regex;
 use serde::Deserialize;
 
+use crate::binding::{self, Rule};
+
 const COMMENT_PREFIXES: [&str; 2] = ["#", "//"];
 const FENCE: &str = "---";
 
@@ -18,6 +20,8 @@ pub struct ArgSpec {
     pub form: Form,
     pub arity: Arity,
     pub help: Option<String>,
+    /// Validated value exported when the arg is omitted (canonical decimal for ints).
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +99,12 @@ pub enum SpecError {
     FlagNamed { arg: String },
     #[error("arg `{arg}`: optional args are always named, remove `named`")]
     NamedOptional { arg: String },
+    #[error("arg `{arg}`: flags cannot have a `default`")]
+    FlagDefault { arg: String },
+    #[error("arg `{arg}`: `default` is only allowed on optional args")]
+    RequiredDefault { arg: String },
+    #[error("arg `{arg}`: invalid default: {rule}")]
+    InvalidDefault { arg: String, rule: Rule },
 }
 
 #[derive(Deserialize)]
@@ -120,6 +130,7 @@ struct RawArg {
     named: bool,
     #[serde(default)]
     many: bool,
+    default: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -273,7 +284,13 @@ fn build_spec(name: &str, raw: RawArg) -> Result<ArgSpec, SpecError> {
     if raw.named && raw.optional {
         return Err(SpecError::NamedOptional { arg });
     }
-    Ok(ArgSpec {
+    if raw.default.is_some() && is_flag {
+        return Err(SpecError::FlagDefault { arg });
+    }
+    if raw.default.is_some() && !raw.optional {
+        return Err(SpecError::RequiredDefault { arg });
+    }
+    let mut spec = ArgSpec {
         kind,
         presence: if raw.optional || is_flag {
             Presence::Optional
@@ -287,7 +304,14 @@ fn build_spec(name: &str, raw: RawArg) -> Result<ArgSpec, SpecError> {
         },
         arity: if raw.many { Arity::Many } else { Arity::Single },
         help: raw.help.as_deref().map(fold),
-    })
+        default: None,
+    };
+    if let Some(default) = raw.default {
+        let value = binding::check_value(&spec, &default)
+            .map_err(|rule| SpecError::InvalidDefault { arg, rule })?;
+        spec.default = Some(value);
+    }
+    Ok(spec)
 }
 
 fn is_passable_choice(choice: &str) -> bool {
@@ -485,7 +509,7 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
     #[test]
     fn unknown_arg_key() {
         assert!(matches!(
-            parse(&header_with_args("name:\n  default: x")),
+            parse(&header_with_args("name:\n  fallback: x")),
             Err(HeaderError::Yaml(_))
         ));
     }
@@ -694,6 +718,59 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
         assert!(matches!(
             spec_error("a:\n  type: flag\n  named: true"),
             SpecError::FlagNamed { .. }
+        ));
+    }
+
+    #[test]
+    fn defaults_are_validated_and_canonical() {
+        let header = parse(&header_with_args(
+            "count:\n  type: int\n  optional: true\n  default: +0008\nmode:\n  choices: [a, b]\n  optional: true\n  default: b\nname:\n  optional: true\n  default: 007",
+        ))
+        .unwrap();
+        assert_eq!(header.args["count"].default.as_deref(), Some("8"));
+        assert_eq!(header.args["mode"].default.as_deref(), Some("b"));
+        assert_eq!(header.args["name"].default.as_deref(), Some("007"));
+        let plain_int = parse(&header_with_args(
+            "count:\n  type: int\n  optional: true\n  default: 1",
+        ))
+        .unwrap();
+        assert_eq!(plain_int.args["count"].default.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn invalid_defaults() {
+        for arg in [
+            "x:\n  choices: [a, b]\n  optional: true\n  default: c",
+            "x:\n  pattern: '[a-z]+'\n  optional: true\n  default: A1",
+            "x:\n  type: int\n  max: 5\n  optional: true\n  default: 6",
+            "x:\n  type: int\n  optional: true\n  default: abc",
+            "x:\n  optional: true\n  default: -v",
+            "x:\n  optional: true\n  default: \"a\\nb\"",
+        ] {
+            assert!(
+                matches!(spec_error(arg), SpecError::InvalidDefault { .. }),
+                "{arg}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_placement() {
+        assert!(matches!(
+            spec_error("x:\n  default: a"),
+            SpecError::RequiredDefault { .. }
+        ));
+        assert!(matches!(
+            spec_error("x:\n  named: true\n  default: a"),
+            SpecError::RequiredDefault { .. }
+        ));
+        assert!(matches!(
+            spec_error("x:\n  many: true\n  default: a"),
+            SpecError::RequiredDefault { .. }
+        ));
+        assert!(matches!(
+            spec_error("x:\n  type: flag\n  default: a"),
+            SpecError::FlagDefault { .. }
         ));
     }
 

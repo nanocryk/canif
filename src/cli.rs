@@ -242,6 +242,9 @@ fn arg_details(spec: &ArgSpec) -> String {
     if spec.arity == Arity::Many {
         parts.push("many".to_owned());
     }
+    if let Some(default) = &spec.default {
+        parts.push(format!("default: {default}"));
+    }
     if let Some(help) = &spec.help {
         parts.push(format!("help: {help}"));
     }
@@ -355,7 +358,7 @@ mod tests {
         let header = header::parse(example.trim_start()).unwrap();
         assert_eq!(
             usage::line("cargo/test", &header),
-            "cargo/test <crate:core|cli> [--filter <filter>] [--jobs <jobs>] [--release]"
+            "cargo/test <crate:core|cli> [--filter <filter>] [--jobs <jobs>=4] [--release]"
         );
     }
 

@@ -26,11 +26,12 @@ YAML in a comment block fenced by `---`, on the first line or right after the sh
 #     min: 1
 #     max: 16
 #     optional: true
+#     default: 4
 #   release:
 #     type: flag
 # ---
 set -euo pipefail
-cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_JOBS:+-j "$CANIF_JOBS"} ${CANIF_FILTER:+"$CANIF_FILTER"}
+cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -j "$CANIF_JOBS" ${CANIF_FILTER:+"$CANIF_FILTER"}
 ```
 
 Called as: `canif run cargo/test core --filter foo --release`
@@ -54,6 +55,7 @@ Called as: `canif run cargo/test core --filter foo --release`
 - `named: true`: required but passed by name.
 - `many: true`: takes all remaining positional values. Only one, and it must be the last positional.
 - `help: ...`: shown by `canif show`.
+- `default: <value>`: exported when an optional arg is omitted, shown in the usage line (`[--jobs <jobs>=4]`). Not allowed on required, `many` or flag args. Validated like a call-time value; an invalid default is a header error.
 
 Required args without `named` are positional.
 
@@ -65,7 +67,7 @@ Ints reach the script in canonical form: `+5` is `5`, `0008` is `8`.
 ## Script environment
 
 - Runs in the caller's cwd; `cd "$CANIF_PROJECT"` if the script needs the project root.
-- `CANIF_<NAME>` per arg, `-` becomes `_` (`dry-run` is `CANIF_DRY_RUN`). Absent optional args are unset. Flags are `1` or unset.
+- `CANIF_<NAME>` per arg, `-` becomes `_` (`dry-run` is `CANIF_DRY_RUN`). Absent optional args are unset, or set to their `default`. Flags are `1` or unset.
 - The `many` arg is the script's argv (`"$@"`) and its env var joined with newlines.
 - `CANIF_DIR`: the `.canif/` holding the script (`source "$CANIF_DIR/_lib/x.sh"`). `CANIF_PROJECT`: its parent.
 - Inherited `CANIF_*` variables are cleared. The exit code is the script's.

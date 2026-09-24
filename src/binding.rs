@@ -167,14 +167,18 @@ pub fn bind(script_name: &str, header: &Header, raw: &[String]) -> Result<Bindin
             None if spec.presence == Presence::Required => {
                 return Err(fail(Some(name), Rule::Missing));
             }
-            None => {}
+            None => {
+                if let Some(default) = &spec.default {
+                    bindings.env.push((env_name, default.clone()));
+                }
+            }
         }
     }
     Ok(bindings)
 }
 
 /// Validates `value` and returns the form passed to the script (canonical decimal for ints).
-fn check_value(spec: &ArgSpec, value: &str) -> Result<String, Rule> {
+pub fn check_value(spec: &ArgSpec, value: &str) -> Result<String, Rule> {
     let owned = || value.to_owned();
     if value.contains(['\n', '\r', '\0']) {
         return Err(Rule::ForbiddenChar { value: owned() });
@@ -301,6 +305,16 @@ mod tests {
     fn absent_optional_leaves_no_env() {
         let bindings = bind_args(DESIGN_ARGS, &["cli"]).unwrap();
         assert_eq!(bindings.env, env(&[("CANIF_CRATE", "cli")]));
+    }
+
+    #[test]
+    fn default_exported_when_omitted_and_overridden_when_given() {
+        let args =
+            "count:\n  type: int\n  optional: true\n  default: '05'\nfilter:\n  optional: true";
+        let omitted = bind_args(args, &[]).unwrap();
+        assert_eq!(omitted.env, env(&[("CANIF_COUNT", "5")]));
+        let given = bind_args(args, &["--count=2"]).unwrap();
+        assert_eq!(given.env, env(&[("CANIF_COUNT", "2")]));
     }
 
     #[test]
