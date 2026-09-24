@@ -87,6 +87,7 @@ canif run [--head <n>] [--tail <n>] <name> ...
                         validate, then run
 canif confirm [--head <n>] [--tail <n>] <name> ...
                         same, for `confirm: true` scripts only
+canif misses            unknown names and validation failures, grouped by script name
 canif check             validate every header and config, report conflicts and stray files
 canif guide             script authoring reference (header format, arg kinds, env, config)
 ```
@@ -100,6 +101,22 @@ canif guide             script authoring reference (header format, arg kinds, en
 - `head` lines print live; `tail` lines print when the script exits. When both are set and the output fits, everything prints once.
 - Every run's full output is logged to `~/.canif/.logs/<unix-millis>-<pid>-<name>.log` (`/` in the name becomes `_`). The newest 50 logs are kept; older ones are deleted after each run.
 - When lines were dropped, canif prints `canif: output trimmed (<dropped> of <total> lines), full log: <path>` to stderr where the gap is. Untrimmed runs print no path. A log that cannot be written prints one `canif: ` warning and never fails the run.
+
+### Miss log
+
+Every `canif run` / `canif confirm` call with an unknown script name or an arg that fails validation appends a line to `~/.canif/.misses.log`, shared by all projects: UTC timestamp, cwd, the name as typed, the reason, then the args. Fields are tab-separated, with `\`, tab, CR and LF escaped. The last 1000 lines are kept. A failed write prints one `canif: ` warning and changes nothing else.
+
+`canif misses` groups the log by script name, most misses first, with each distinct reason and its count:
+
+```
+3  cargo/tets
+     3  unknown script
+2  cargo/test
+     1  arg `count`: 9 is out of range, must be in 1..=5
+     1  arg `crate`: `nope` is not one of core|cli
+```
+
+It shows which scripts agents look for and don't find, and which arg rules are too tight.
 
 ## Example scripts
 
@@ -128,7 +145,8 @@ Add to `~/.claude/settings.json` (or a project's `.claude/settings.json`):
       "Bash(canif list*)",
       "Bash(canif show *)",
       "Bash(canif check)",
-      "Bash(canif guide)"
+      "Bash(canif guide)",
+      "Bash(canif misses)"
     ],
     "ask": [
       "Edit(**/.canif/**)",

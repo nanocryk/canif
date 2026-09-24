@@ -4,6 +4,7 @@ mod config;
 mod discovery;
 mod exec;
 mod header;
+mod misses;
 mod output;
 mod suggest;
 mod usage;

@@ -56,12 +56,19 @@ pub enum Rule {
     BareDoubleDash,
 }
 
+impl BindError {
+    /// The failing arg and broken rule, without the usage line.
+    pub fn reason(&self) -> String {
+        match &self.arg {
+            Some(arg) => format!("arg `{arg}`: {}", self.rule),
+            None => self.rule.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for BindError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(arg) = &self.arg {
-            write!(formatter, "arg `{arg}`: ")?;
-        }
-        write!(formatter, "{}\nusage: {}", self.rule, self.usage)
+        write!(formatter, "{}\nusage: {}", self.reason(), self.usage)
     }
 }
 

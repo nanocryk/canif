@@ -1,6 +1,6 @@
 use std::io;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -8,6 +8,7 @@ use crate::binding::{self, BindError};
 use crate::discovery::{self, Discovery, DiscoveryError, Script};
 use crate::exec::{self, ExecError};
 use crate::header::{self, ArgKind, ArgSpec, Arity, Confirm, Header, HeaderError, Presence};
+use crate::misses;
 use crate::output::{LOGS_DIR, Trim};
 use crate::suggest;
 use crate::usage;
@@ -33,6 +34,8 @@ pub enum Action {
     /// Same as `run`, for scripts whose header sets `confirm: true`.
     #[command(disable_help_flag = true)]
     Confirm(Invocation),
+    /// Print the miss log (unknown names, validation failures) grouped by script name.
+    Misses,
     /// Validate every script header and report conflicts.
     Check,
     /// Print the reference for writing scripts: header format, arg kinds, env, config.
@@ -99,6 +102,8 @@ pub enum CliError {
     Bind(#[from] BindError),
     #[error(transparent)]
     Exec(#[from] ExecError),
+    #[error("cannot read miss log {}: {source}", path.display())]
+    MissLog { path: PathBuf, source: io::Error },
 }
 
 /// Runs the parsed command and returns the process exit code.
@@ -116,6 +121,10 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
         }
         Action::Run(invocation) => run(&invocation, Confirm::NotRequired),
         Action::Confirm(invocation) => run(&invocation, Confirm::Required),
+        Action::Misses => {
+            print!("{}", misses_summary()?);
+            Ok(0)
+        }
         Action::Check => {
             let report = check(&discover_all()?);
             print!("{}", report.text);
@@ -133,6 +142,29 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
 
 /// Shared by `run` and `confirm`: `invoked` is the confirm level the subcommand serves.
 fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
+    let home = std::env::home_dir();
+    let result = run_script(invocation, invoked, home.as_deref());
+    let miss_reason = match &result {
+        Err(CliError::UnknownScript { .. }) => Some("unknown script".to_owned()),
+        Err(CliError::Bind(error)) => Some(error.reason()),
+        _ => None,
+    };
+    if let Some(reason) = miss_reason {
+        misses::record(
+            home.as_deref(),
+            invocation.name(),
+            invocation.args(),
+            reason,
+        );
+    }
+    result
+}
+
+fn run_script(
+    invocation: &Invocation,
+    invoked: Confirm,
+    home: Option<&Path>,
+) -> Result<i32, CliError> {
     let discovery = discover()?;
     let script = find(&discovery, invocation.name())?;
     let header = load_header(script)?;
@@ -148,7 +180,7 @@ fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
         head: invocation.head,
         tail: invocation.tail,
     });
-    let logs_dir = std::env::home_dir().map(|home| home.join(discovery::DIR_NAME).join(LOGS_DIR));
+    let logs_dir = home.map(|home| home.join(discovery::DIR_NAME).join(LOGS_DIR));
     Ok(exec::run(
         script,
         origin,
@@ -157,6 +189,18 @@ fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
         trim,
         logs_dir.as_deref(),
     )?)
+}
+
+fn misses_summary() -> Result<String, CliError> {
+    let Some(home) = std::env::home_dir() else {
+        return Ok(misses::summary(""));
+    };
+    let path = misses::log_path(&home);
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(misses::summary(&String::from_utf8_lossy(&bytes))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(misses::summary("")),
+        Err(source) => Err(CliError::MissLog { path, source }),
+    }
 }
 
 /// Discovery that fails on the first unreadable entry or invalid config.

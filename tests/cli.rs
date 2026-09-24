@@ -847,6 +847,180 @@ fn background_process_does_not_hold_the_run() {
     assert!(elapsed.as_secs() < 10, "took {elapsed:?}");
 }
 
+fn misses_path(fixture: &Fixture) -> PathBuf {
+    fixture.home.join(".canif").join(".misses.log")
+}
+
+fn miss_lines(fixture: &Fixture) -> Vec<String> {
+    match fs::read_to_string(misses_path(fixture)) {
+        Ok(text) => text.lines().map(str::to_owned).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Checks the timestamp shape and cwd, returns the name, reason and argv fields.
+fn miss_fields(fixture: &Fixture, line: &str) -> Vec<String> {
+    let fields: Vec<&str> = line.split('\t').collect();
+    let timestamp = fields[0];
+    assert_eq!(timestamp.len(), 20, "{line}");
+    assert!(
+        timestamp.ends_with('Z') && &timestamp[10..11] == "T",
+        "{line}"
+    );
+    assert_eq!(
+        fields[1],
+        fixture.project.display().to_string().replace('\\', "\\\\")
+    );
+    fields[2..]
+        .iter()
+        .map(|field| (*field).to_owned())
+        .collect()
+}
+
+#[test]
+fn unknown_name_and_validation_failure_are_logged() {
+    let fixture = listed_fixture();
+    let output = fixture.canif(&["run", "echo/al", "fast", "a\tb"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output).trim_end(),
+        "canif: unknown script `echo/al`, did you mean `echo/all`?"
+    );
+    let output = fixture.canif(&["run", "echo/all", "nope", "x y", "--release"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!stderr(&output).contains("miss"), "{}", stderr(&output));
+
+    let lines = miss_lines(&fixture);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(
+        miss_fields(&fixture, &lines[0]),
+        ["echo/al", "unknown script", "fast", "a\\tb"]
+    );
+    assert_eq!(
+        miss_fields(&fixture, &lines[1]),
+        [
+            "echo/all",
+            "arg `mode`: `nope` is not one of fast|slow",
+            "nope",
+            "x y",
+            "--release"
+        ]
+    );
+}
+
+#[test]
+fn confirm_misses_are_logged() {
+    let fixture = confirm_fixture();
+    fixture.canif(&["confirm", "deploy/prd"]);
+    fixture.canif(&["confirm", "deploy/prod", "dev"]);
+    let lines = miss_lines(&fixture);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(
+        miss_fields(&fixture, &lines[0]),
+        ["deploy/prd", "unknown script"]
+    );
+    assert_eq!(
+        miss_fields(&fixture, &lines[1]),
+        [
+            "deploy/prod",
+            "arg `env`: `dev` is not one of staging|prod",
+            "dev"
+        ]
+    );
+}
+
+#[test]
+fn successes_and_refusals_are_not_misses() {
+    let fixture = confirm_fixture();
+    fixture.write(".canif/broken.sh", BROKEN);
+    let output = fixture.canif(&["run", "greet"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let output = fixture.canif(&["run", "deploy/prod", "nope"]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = fixture.canif(&["confirm", "greet"]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = fixture.canif(&["run", "broken"]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = fixture.canif(&["show", "nothing"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!misses_path(&fixture).exists());
+}
+
+#[test]
+fn miss_log_keeps_the_last_1000_lines() {
+    let fixture = listed_fixture();
+    let prefill: String = (0..1005)
+        .map(|index| format!("t\tcwd\told/{index}\tunknown script\n"))
+        .collect();
+    write(&fixture.home, ".canif/.misses.log", &prefill);
+    let output = fixture.canif(&["run", "nothing"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!stderr(&output).contains("miss log"), "{}", stderr(&output));
+    let lines = miss_lines(&fixture);
+    assert_eq!(lines.len(), 1000);
+    assert_eq!(lines[0], "t\tcwd\told/6\tunknown script");
+    assert_eq!(lines[998], "t\tcwd\told/1004\tunknown script");
+    assert_eq!(
+        miss_fields(&fixture, &lines[999]),
+        ["nothing", "unknown script"]
+    );
+}
+
+#[test]
+fn misses_groups_by_name() {
+    let fixture = listed_fixture();
+    let output = fixture.canif(&["misses"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "no misses recorded\n");
+
+    for args in [
+        &["run", "cargo/tets", "core"][..],
+        &["run", "cargo/test", "nope"],
+        &["run", "cargo/tets"],
+        &["run", "cargo/test", "core", "--count", "9"],
+        &["run", "cargo/test", "nope"],
+        &["run", "cargo/tets"],
+    ] {
+        assert_eq!(fixture.canif(args).status.code(), Some(2));
+    }
+    let output = fixture.canif(&["misses"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "3  cargo/test
+     2  arg `crate`: `nope` is not one of core|cli
+     1  arg `count`: 9 is out of range, must be in 1..=5
+3  cargo/tets
+     3  unknown script
+"
+    );
+}
+
+#[test]
+fn unwritable_miss_log_only_warns() {
+    let fixture = listed_fixture();
+    // A directory where the miss log should be makes every write fail.
+    fs::create_dir_all(misses_path(&fixture)).unwrap();
+    let output = fixture.canif(&["run", "echo/all", "nope", "a.rs"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let err = stderr(&output).replace("\r\n", "\n");
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(lines.len(), 3, "{err}");
+    assert!(
+        lines[0].starts_with("canif: cannot write miss log "),
+        "{err}"
+    );
+    assert_eq!(
+        lines[1],
+        "canif: arg `mode`: `nope` is not one of fast|slow"
+    );
+
+    let output = fixture.canif(&["run", "greet"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+}
+
 #[test]
 fn run_conflicted_name_fails() {
     let fixture = Fixture::new();

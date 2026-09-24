@@ -129,6 +129,11 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 - `~/.canif/.misses.log`, shared by every project. One line per unknown script name or validation failure: timestamp, cwd, full argv, reason (unknown name, or the failing arg and rule).
 - Capped at the last 1000 lines.
 - Shows which scripts agents lack and which constraints are too tight.
+- Written by `run` and `confirm` only. Wrong-subcommand refusals, header errors and script failures are not misses.
+- Line format: tab-separated `<timestamp>\t<cwd>\t<name>\t<reason>\t<arg>...`, one field per argv value after the name (none when there are no args). `\`, tab, CR and LF inside a field are escaped as `\\`, `\t`, `\r`, `\n`. Timestamp: UTC `2026-09-24T13:05:09Z`. Reason: `unknown script`, or the validation error's first line (`arg `mode`: `nope` is not one of fast|slow`).
+- Cap: append, then when the file holds more than 1000 lines, write the last 1000 to a temp file in the same directory and rename it over the log. Concurrent runs are best effort.
+- A write failure prints one `canif: ` warning; output and exit code are unchanged. No home: nothing is written.
+- `canif misses` output: one `<total>  <name>` line per script name, most misses first (ties by name), each followed by `     <count>  <reason>` lines, same order. argv, cwd and timestamps are not printed. Empty or missing log: `no misses recorded`. Malformed lines are skipped.
 
 ## CLI
 
