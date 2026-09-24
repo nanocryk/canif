@@ -1,0 +1,13 @@
+---
+name: canif
+description: Use canif scripts instead of ad-hoc shell commands. TRIGGER before writing any build, test, lint, format, deploy, or other multi-flag shell command in a project; also when the user mentions canif or `.canif/`.
+---
+
+`canif run` is allowlisted: it runs reviewed scripts without a permission prompt. Ad-hoc commands prompt the user.
+
+- Before an ad-hoc command, run `canif list <terms>` (terms match script names and descriptions, any term). Plain `canif list` to see everything.
+- Each line is a usage line: `<name> <required> [--optional <value>] [--flag]  # description`. Choices show inline as `<arg:a|b>`. `canif show <name>` gives patterns, int ranges and help.
+- Call `canif run <name> <args>` exactly as the usage line says. Required args positional, optional ones `--name value`. A trailing `<arg>...` takes several values; shell globs are fine there.
+- A validation error prints the broken rule and the usage line: fix the call and retry once. Values may not start with `-` (except ints) or contain newlines.
+- Never edit `.canif/` directly to make a call pass. When a script is missing or too narrow, propose a new or changed script to the user (header format in the canif README), then use it once added.
+- `canif check` validates all headers after script changes.
