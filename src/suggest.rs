@@ -1,4 +1,6 @@
 const MAX_DISTANCE: usize = 3;
+/// One edit allowed per this many chars of the typed name, so short names only match near-exact.
+const CHARS_PER_EDIT: usize = 3;
 
 /// Edit distance over chars (insert, delete, substitute all cost 1).
 pub fn levenshtein(left: &str, right: &str) -> usize {
@@ -18,13 +20,14 @@ pub fn levenshtein(left: &str, right: &str) -> usize {
     previous[right.len()]
 }
 
-/// Closest candidate within [`MAX_DISTANCE`] edits, else the only candidate containing `name`.
+/// Closest candidate within the allowed edits, else the only candidate containing `name`.
 pub fn closest<'candidate>(name: &str, candidates: &[&'candidate str]) -> Option<&'candidate str> {
+    let allowed = (name.chars().count() / CHARS_PER_EDIT).clamp(1, MAX_DISTANCE);
     let nearest = candidates
         .iter()
         .map(|candidate| (levenshtein(name, candidate), *candidate))
         .min_by_key(|(distance, _)| *distance)
-        .filter(|(distance, _)| *distance <= MAX_DISTANCE)
+        .filter(|(distance, _)| *distance <= allowed)
         .map(|(_, candidate)| candidate);
     if nearest.is_some() {
         return nearest;
@@ -63,6 +66,14 @@ mod tests {
     #[test]
     fn distance_ties_keep_first_candidate() {
         assert_eq!(closest("ab", &["aa", "bb"]), Some("aa"));
+    }
+
+    #[test]
+    fn short_names_allow_fewer_edits() {
+        let candidates = ["fmt", "lint"];
+        assert_eq!(closest("ls", &candidates), None);
+        assert_eq!(closest("fnt", &candidates), Some("fmt"));
+        assert_eq!(closest("carg/tets", &["cargo/test"]), Some("cargo/test"));
     }
 
     #[test]

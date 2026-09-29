@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
@@ -104,39 +104,53 @@ pub enum CliError {
     Exec(#[from] ExecError),
     #[error("cannot read miss log {}: {source}", path.display())]
     MissLog { path: PathBuf, source: io::Error },
+    #[error("cannot write to stdout: {0}")]
+    Stdout(io::Error),
 }
 
 /// Runs the parsed command and returns the process exit code.
 pub fn execute(cli: Cli) -> Result<i32, CliError> {
     match cli.action {
         Action::List { terms } => {
-            print!("{}", list(&discover()?, &terms));
+            emit(&list(&discover()?, &terms))?;
             Ok(0)
         }
         Action::Show { name } => {
             let discovery = discover()?;
             let script = find(&discovery, &name)?;
-            print!("{}", show(script, &load_header(script)?));
+            emit(&show(script, &load_header(script)?))?;
             Ok(0)
         }
         Action::Run(invocation) => run(&invocation, Confirm::NotRequired),
         Action::Confirm(invocation) => run(&invocation, Confirm::Required),
         Action::Misses => {
-            print!("{}", misses_summary()?);
+            emit(&misses_summary()?)?;
             Ok(0)
         }
         Action::Check => {
             let report = check(&discover_all()?);
-            print!("{}", report.text);
+            emit(&report.text)?;
             Ok(match report.outcome {
                 Outcome::Clean => 0,
                 Outcome::Problems => 1,
             })
         }
         Action::Guide => {
-            print!("{GUIDE}");
+            emit(GUIDE)?;
             Ok(0)
         }
+    }
+}
+
+/// Writes to stdout; a reader that stopped early (`canif list | head`) is not an error.
+fn emit(text: &str) -> Result<(), CliError> {
+    let mut stdout = io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Err(error) if error.kind() != io::ErrorKind::BrokenPipe => Err(CliError::Stdout(error)),
+        _ => Ok(()),
     }
 }
 

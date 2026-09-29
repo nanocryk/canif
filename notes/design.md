@@ -49,13 +49,14 @@ YAML inside a comment block fenced by `---` lines. Comment prefix `#` or `//` is
 #   crate:
 #     choices: [core, cli]
 #   filter:
-#     pattern: ^[A-Za-z0-9_:]+$
+#     pattern: '[A-Za-z0-9_:]+'
 #     optional: true
 #     help: Test name filter
 #   release:
 #     type: flag
 # ---
-cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
+set -euo pipefail
+cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF_FILTER"}
 ```
 
 - `description` is the only searchable text; no tags.
@@ -151,7 +152,8 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -- "${CANIF_FILTER:-}"
 
 Errors:
 - canif's own errors go to stderr prefixed `canif: `, exit code 2. Errors parsing canif's own arguments keep clap's format.
-- Unknown script name: suggest the closest match.
+- Unknown script name: suggest the closest match, within one edit per 3 chars of the typed name (at least 1, at most 3), else the only name containing it.
+- A closed stdout (`canif list | head`) is not an error for `list`, `show`, `misses`, `check`, `guide`.
 - Validation failure: print the failing arg, the rule it broke, and the script's usage line, so the agent fixes it in one retry.
 
 ## Claude Code integration
