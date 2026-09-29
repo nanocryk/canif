@@ -19,11 +19,11 @@ pub fn line(script_name: &str, header: &Header) -> String {
     line
 }
 
-/// Full invocation with the subcommand the script's `confirm` requires.
+/// Full invocation, through `canif auto` unless the script is risky.
 pub fn command(script_name: &str, header: &Header) -> String {
     format!(
         "canif {} {}",
-        header.confirm.subcommand(),
+        header.risk.subcommand(),
         line(script_name, header)
     )
 }
@@ -125,11 +125,11 @@ mod tests {
     }
 
     #[test]
-    fn command_names_the_required_subcommand() {
+    fn command_prefers_auto() {
         let header = header::parse("# ---\n# description: x\n# ---\n").unwrap();
-        assert_eq!(command("hello", &header), "canif run hello");
-        let header = header::parse("# ---\n# description: x\n# confirm: true\n# ---\n").unwrap();
-        assert_eq!(command("deploy", &header), "canif confirm deploy");
+        assert_eq!(command("hello", &header), "canif auto hello");
+        let header = header::parse("# ---\n# description: x\n# risky: true\n# ---\n").unwrap();
+        assert_eq!(command("deploy", &header), "canif run deploy");
     }
 
     #[test]

@@ -6,7 +6,9 @@ Run reviewed scripts with validated arguments, so AI agents can be allowlisted o
 
 Agents keep writing long, slightly different shell commands. A glob allowlist can't separate the safe variants from the risky ones, so every call prompts and you end up skimming flags.
 
-canif moves the review from each command to each script. Scripts live in `.canif/` directories and declare their arguments in a header. The agent calls `canif run <script> <args>`, and canif validates every value against the header before the script sees it. You review the script once, in git; the agent only varies arguments.
+canif moves the review from each command to each script. Scripts live in `.canif/` directories and declare their arguments in a header. The agent calls `canif auto <script> <args>`, and canif validates every value against the header before the script sees it. You review the script once, in git; the agent only varies arguments.
+
+Scripts marked `risky: true` (deploys, deletions) are refused by `canif auto`. They only run through `canif run`, which you keep off the allowlist, so the agent's frontend asks you each time. Run by hand, `canif run` runs any script.
 
 `.canif/cargo/test.sh` is the script `cargo/test`:
 
@@ -29,8 +31,8 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 ```
 
 ```sh
-canif run cargo/test core --filter foo --release   # runs
-canif run cargo/test core --filter 'foo; rm -rf ~' # rejected, prints the rule and usage line
+canif auto cargo/test core --filter foo --release   # runs
+canif auto cargo/test core --filter 'foo; rm -rf ~' # rejected, prints the rule and usage line
 ```
 
 ## Quick start
@@ -49,7 +51,7 @@ Allow canif in Claude Code, in `~/.claude/settings.json` (or a project's `.claud
 {
   "permissions": {
     "allow": [
-      "Bash(canif run *)",
+      "Bash(canif auto *)",
       "Bash(canif list*)",
       "Bash(canif show *)",
       "Bash(canif check)",
@@ -64,7 +66,7 @@ Allow canif in Claude Code, in `~/.claude/settings.json` (or a project's `.claud
 }
 ```
 
-- `canif confirm` is left out of `allow` on purpose, so `confirm: true` scripts always prompt.
+- `canif run` is left out of `allow` on purpose: it is the only way to run `risky: true` scripts, so those always prompt.
 - The `ask` rules make every script change go through you. They win over allow rules and over `acceptEdits` mode. `Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule.
 
 Install the agent skill, which tells the agent to look for a script before writing an ad-hoc command: copy `skill/` to `~/.claude/skills/canif/`.
@@ -78,10 +80,10 @@ Then write your own scripts: `canif guide` prints the authoring reference.
 ```
 canif list [terms...]   scripts with usage lines, filtered by name/description
 canif show <name>       full arg rules and source path
+canif auto [--head <n>] [--tail <n>] <name> ...
+                        validate, then run; refuses `risky: true` scripts
 canif run [--head <n>] [--tail <n>] <name> ...
-                        validate, then run
-canif confirm [--head <n>] [--tail <n>] <name> ...
-                        same, for `confirm: true` scripts only
+                        same, for any script
 canif misses            unknown names and validation failures, grouped by script name
 canif check             validate every header and config, report conflicts and stray files
 canif guide             script authoring reference (header format, arg kinds, env, config)
@@ -89,7 +91,7 @@ canif guide             script authoring reference (header format, arg kinds, en
 
 ## Trust model
 
-canif validates arguments; it does not sandbox scripts. An allowlisted `canif run` executes any script discovery finds, with your permissions.
+canif validates arguments; it does not sandbox scripts. An allowlisted `canif auto` executes any script discovery finds that is not marked `risky: true`, with your permissions.
 
 - Discovery trusts every `.canif/` from the cwd up. In a cloned repo, its scripts run without a prompt and shadow same-named `~/.canif` scripts. Its `.canif/.config.yml` can also replace interpreters for every script, home ones included.
 - Review a repo's `.canif/` before running canif in it, and again after pulls. `root: true` in `.canif/.config.yml` stops the walk upward. Keep `~/.canif` script names unlikely to clash.
@@ -116,7 +118,7 @@ canif validates arguments; it does not sandbox scripts. An allowlisted `canif ru
 - **Options**: `optional: true`, `named: true`, `many: true`, `default: <value>`, `help: ...`. Required args are positional, optional ones named (`--name value` or `--name=value`). One `many` arg at most, the last positional; shell globs expand into it.
 - **Values**: rejected if they start with `-` (except ints), or contain a newline, carriage return or NUL.
 - **Environment**: `CANIF_<NAME>` per arg (`dry-run` is `CANIF_DRY_RUN`), flags `1` or unset. `CANIF_DIR` is the `.canif/` holding the script, `CANIF_PROJECT` its parent. The script runs in the caller's cwd and its exit code is canif's.
-- **`confirm: true`**: the script only runs through `canif confirm`, which is not allowlisted. Use it for deploys and deletions.
+- **`risky: true`**: `canif auto` refuses the script, so it only runs through `canif run`. Use it for deploys, deletions, anything hard to undo.
 - **`output: {head: <n>, tail: <n>}`**: default trimming of the script's output, see [Output](#output).
 
 Run `canif check` after writing a script.
@@ -124,14 +126,14 @@ Run `canif check` after writing a script.
 ## Output
 
 - stdout and stderr are relayed line by line, each line to the stream it came from. Trimming counts lines over both streams merged in arrival order.
-- `--head` / `--tail` go before the script name (`canif run --tail 80 cargo/test core`) and replace the header's value for that key. Everything after the name goes to the script.
+- `--head` / `--tail` go before the script name (`canif auto --tail 80 cargo/test core`) and replace the header's value for that key. Everything after the name goes to the script.
 - `head` lines print live; `tail` lines print when the script exits. When both are set and the output fits, everything prints once.
 - Every run's full output is logged to `~/.canif/.logs/<unix-millis>-<pid>-<name>.log` (`/` in the name becomes `_`). The newest 50 logs are kept.
 - When lines were dropped, canif prints `canif: output trimmed (<dropped> of <total> lines), full log: <path>` to stderr where the gap is, so the agent reads the log instead of re-running. A log that cannot be written prints one warning and never fails the run.
 
 ## Miss log
 
-Every `canif run` / `canif confirm` call with an unknown script name or an invalid arg is appended to `~/.canif/.misses.log`, shared by all projects (last 1000 lines kept). `canif misses` groups it by script name, most misses first:
+Every `canif auto` / `canif run` call with an unknown script name or an invalid arg is appended to `~/.canif/.misses.log`, shared by all projects (last 1000 lines kept). `canif misses` groups it by script name, most misses first:
 
 ```
 3  cargo/tets

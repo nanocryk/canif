@@ -203,7 +203,7 @@ fn show_prints_arg_rules() {
     let output = fixture.canif(&["show", "echo/all"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let expected = format!(
-        "usage: canif run echo/all <mode:fast|slow> <files>... [--filter <filter>] [--release]
+        "usage: canif auto echo/all <mode:fast|slow> <files>... [--filter <filter>] [--release]
 description: Echo everything
 source: {}
 arg mode: choices fast|slow, required
@@ -284,7 +284,7 @@ fn run_validation_failure() {
     assert_eq!(
         stderr(&output).replace("\r\n", "\n"),
         "canif: arg `mode`: `nope` is not one of fast|slow
-usage: canif run echo/all <mode:fast|slow> <files>... [--filter <filter>] [--release]
+usage: canif auto echo/all <mode:fast|slow> <files>... [--filter <filter>] [--release]
 "
     );
 }
@@ -422,7 +422,7 @@ fn show_and_list_print_defaults() {
     let output = fixture.canif(&["show", "defaults"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let expected = format!(
-        "usage: canif run defaults [--count <count>=3] [--label <label>=hi]
+        "usage: canif auto defaults [--count <count>=3] [--label <label>=hi]
 description: Echo defaults
 source: {}
 arg count: int >= 1, optional, default: 3, help: Repeat count
@@ -462,7 +462,7 @@ fn check_reports_invalid_default() {
 const DEPLOY: &str = "#!/usr/bin/env bash
 # ---
 # description: Deploy the app
-# confirm: true
+# risky: true
 # args:
 #   env:
 #     choices: [staging, prod]
@@ -471,7 +471,7 @@ echo \"deploying $CANIF_ENV\"
 exit 4
 ";
 
-fn confirm_fixture() -> Fixture {
+fn risky_fixture() -> Fixture {
     let fixture = Fixture::new();
     fixture.write(".canif/deploy/prod.sh", DEPLOY);
     fixture.write(".canif/greet.sh", GREET);
@@ -479,54 +479,50 @@ fn confirm_fixture() -> Fixture {
 }
 
 #[test]
-fn run_refuses_confirm_script_before_validation() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["run", "deploy/prod", "nope"]);
+fn auto_refuses_risky_script_before_validation() {
+    let fixture = risky_fixture();
+    let output = fixture.canif(&["auto", "deploy/prod", "nope"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     assert_eq!(
         stderr(&output).trim_end(),
-        "canif: script `deploy/prod` has `confirm: true`, run `canif confirm deploy/prod`"
+        "canif: script `deploy/prod` has `risky: true`, run it with `canif run deploy/prod`"
     );
 }
 
 #[test]
-fn confirm_refuses_other_scripts() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["confirm", "greet"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-        stderr(&output).trim_end(),
-        "canif: script `greet` does not have `confirm: true`, run `canif run greet`"
-    );
+fn auto_runs_routine_scripts() {
+    let fixture = risky_fixture();
+    let output = fixture.canif(&["auto", "greet"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(!output.stdout.is_empty());
 }
 
 #[test]
-fn confirm_runs_confirm_script() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["confirm", "deploy/prod", "staging"]);
+fn run_runs_risky_script() {
+    let fixture = risky_fixture();
+    let output = fixture.canif(&["run", "deploy/prod", "staging"]);
     assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
     assert_eq!(stdout(&output), "deploying staging\n");
 }
 
 #[test]
-fn confirm_validation_failure_shows_its_usage() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["confirm", "deploy/prod", "dev"]);
+fn risky_validation_failure_shows_its_usage() {
+    let fixture = risky_fixture();
+    let output = fixture.canif(&["run", "deploy/prod", "dev"]);
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr(&output).replace("\r\n", "\n"),
         "canif: arg `env`: `dev` is not one of staging|prod
-usage: canif confirm deploy/prod <env:staging|prod>
+usage: canif run deploy/prod <env:staging|prod>
 "
     );
 }
 
 #[test]
-fn confirm_unknown_name_suggests() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["confirm", "deploy/prd", "staging"]);
+fn auto_unknown_name_suggests() {
+    let fixture = risky_fixture();
+    let output = fixture.canif(&["auto", "deploy/prd", "staging"]);
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stderr(&output).trim_end(),
@@ -535,13 +531,13 @@ fn confirm_unknown_name_suggests() {
 }
 
 #[test]
-fn list_and_show_mark_confirm_scripts() {
-    let fixture = confirm_fixture();
+fn list_and_show_mark_risky_scripts() {
+    let fixture = risky_fixture();
     let output = fixture.canif(&["list"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let expected = format!(
         "{}:
-  deploy/prod <env:staging|prod>  # [confirm] Deploy the app
+  deploy/prod <env:staging|prod>  # [risky] Deploy the app
   greet  # Say hello from home
 ",
         fixture.canif_dir().display()
@@ -551,10 +547,10 @@ fn list_and_show_mark_confirm_scripts() {
     let output = fixture.canif(&["show", "deploy/prod"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let expected = format!(
-        "usage: canif confirm deploy/prod <env:staging|prod>
+        "usage: canif run deploy/prod <env:staging|prod>
 description: Deploy the app
 source: {}
-confirm: required
+risky: true
 arg env: choices staging|prod, required
 ",
         fixture.canif_dir().join("deploy").join("prod.sh").display()
@@ -562,7 +558,7 @@ arg env: choices staging|prod, required
     assert_eq!(stdout(&output), expected);
 
     let output = fixture.canif(&["show", "greet"]);
-    assert!(!stdout(&output).contains("confirm"));
+    assert!(!stdout(&output).contains("risky"));
 }
 
 const COUNT: &str = "#!/usr/bin/env bash
@@ -671,11 +667,12 @@ fn cli_head_overrides_header_and_keeps_its_tail() {
 }
 
 #[test]
-fn confirm_accepts_trim_options() {
-    let fixture = confirm_fixture();
-    let output = fixture.canif(&["confirm", "--tail", "5", "deploy/prod", "staging"]);
-    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
-    assert_eq!(stdout(&output), "deploying staging\n");
+fn auto_accepts_trim_options() {
+    let fixture = Fixture::new();
+    fixture.write(".canif/count.sh", COUNT);
+    let output = fixture.canif(&["auto", "--tail", "2", "count", "5"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(stdout(&output), numbered(4..=5));
 }
 
 #[test]
@@ -775,7 +772,7 @@ fn show_prints_output_trimming() {
     );
     let output = fixture.canif(&["show", "count"]);
     let expected = format!(
-        "usage: canif run count <lines>
+        "usage: canif auto count <lines>
 description: Print numbered lines
 source: {}
 output: head 2, tail 3
@@ -909,10 +906,10 @@ fn unknown_name_and_validation_failure_are_logged() {
 }
 
 #[test]
-fn confirm_misses_are_logged() {
-    let fixture = confirm_fixture();
-    fixture.canif(&["confirm", "deploy/prd"]);
-    fixture.canif(&["confirm", "deploy/prod", "dev"]);
+fn auto_misses_are_logged() {
+    let fixture = risky_fixture();
+    fixture.canif(&["auto", "deploy/prd"]);
+    fixture.canif(&["run", "deploy/prod", "dev"]);
     let lines = miss_lines(&fixture);
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert_eq!(
@@ -931,13 +928,11 @@ fn confirm_misses_are_logged() {
 
 #[test]
 fn successes_and_refusals_are_not_misses() {
-    let fixture = confirm_fixture();
+    let fixture = risky_fixture();
     fixture.write(".canif/broken.sh", BROKEN);
     let output = fixture.canif(&["run", "greet"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    let output = fixture.canif(&["run", "deploy/prod", "nope"]);
-    assert_eq!(output.status.code(), Some(2));
-    let output = fixture.canif(&["confirm", "greet"]);
+    let output = fixture.canif(&["auto", "deploy/prod", "nope"]);
     assert_eq!(output.status.code(), Some(2));
     let output = fixture.canif(&["run", "broken"]);
     assert_eq!(output.status.code(), Some(2));

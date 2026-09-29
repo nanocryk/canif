@@ -575,7 +575,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error.to_string(),
-            "arg `crate`: `nope` is not one of core|cli\nusage: canif run cargo/test <crate:core|cli> [--filter <filter>] [--release]"
+            "arg `crate`: `nope` is not one of core|cli\nusage: canif auto cargo/test <crate:core|cli> [--filter <filter>] [--release]"
         );
     }
 

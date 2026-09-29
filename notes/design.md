@@ -4,7 +4,7 @@
 
 Agents (Claude Code) keep producing long, similar-looking shell commands that can't be allowlisted with a glob because some argument variants are risky. Reviewing each one means skimming flags nobody knows by heart.
 
-canif moves the review from each command to each script: scripts are reviewed once, the agent only varies arguments, and canif validates those against types declared in the script. `canif run *` is allowlisted in Claude Code.
+canif moves the review from each command to each script: scripts are reviewed once, the agent only varies arguments, and canif validates those against types declared in the script. `canif auto *` is allowlisted in Claude Code; `canif auto` refuses scripts marked risky.
 
 Aimed at AI agents, not humans: no interactive UI. Output is optimized to save agent round trips and tokens. Inspired by iforgor, minus the TUI.
 
@@ -61,7 +61,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 
 - `description` is the only searchable text; no tags.
 - `description` and `help` are folded to one line: every run of whitespace or control chars (newlines, tabs, NUL) becomes one space, ends trimmed. YAML block scalars (`|`, `>`) can wrap long text.
-- `confirm: true`: the script runs only through `canif confirm`, which stays off the allowlist so Claude Code prompts for every call.
+- `risky: true`: `canif auto` refuses the script, so it runs only through `canif run`, which stays off the allowlist so Claude Code prompts for every call. canif itself never prompts.
 - `output: {head: <n>, tail: <n>}`: default trimming of the script's output (either key or both).
 - `args` is a map; key order is the positional order.
 - Arg names match `[a-z][a-z0-9-]*`. `dry-run` is passed as `--dry-run` and exported as `CANIF_DRY_RUN`. The charset makes this mapping collision-free.
@@ -78,7 +78,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 ## Arguments at call time
 
 - Required args are positional, optional args are named `--name value` or `--name=value` (clap convention).
-- At most one `many` arg per script, and only as the last positional: `canif run fmt/files a.rs b.rs`.
+- At most one `many` arg per script, and only as the last positional: `canif auto fmt/files a.rs b.rs`.
 - Rejected in every value: leading `-` (except `int` values, so `-5` is valid), newline, NUL.
 - No unvalidated rest args.
 
@@ -93,7 +93,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 
 - canif never expands globs.
 - The calling shell (Claude Code's Bash tool is Git Bash, even on Windows) expands unquoted globs before canif runs, so they land in the `many` last positional. Commands are designed around that.
-- An unquoted glob in `canif run ...` does not trigger a Claude Code permission prompt under the `Bash(canif run *)` allow rule (observed with `canif run glob-probe src/*.rs`).
+- An unquoted glob does not trigger a Claude Code permission prompt under a `Bash(canif <subcommand> *)` allow rule (observed with `glob-probe src/*.rs`).
 - An unmatched glob reaches canif literally and goes through normal validation.
 - Scripts that need a file set compute it themselves (e.g. from `git diff`) rather than taking a pattern.
 
@@ -102,7 +102,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 - Script runs in the caller's cwd.
 - `CANIF_DIR`: the `.canif/` directory holding the running script (never one found from the cwd). Used to call other scripts and source libs: `source "$CANIF_DIR/_lib/common.sh"`.
 - `CANIF_PROJECT`: parent of `CANIF_DIR`. Used for project paths: `cd "$CANIF_PROJECT"`.
-- A script may call `canif run other/script ...` to get validation on the nested call.
+- A script may call `canif auto other/script ...` to get validation on the nested call.
 - Every inherited `CANIF_*` variable (case-insensitive) is removed before the script's own are set, so nested calls don't leak optional args.
 - On Windows, `CANIF_DIR`, `CANIF_PROJECT` and the script path given to the interpreter use forward slashes.
 - Interpreter invocation, program from config override or default:
@@ -114,8 +114,8 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 
 ## Output
 
-- Trimming: `head` and `tail` from the header, overridden per call with options before the script name: `canif run --tail 80 cargo/test core`.
-- The full output of every run is written to `~/.canif/.logs/`. canif keeps the last 50 logs and deletes older ones on each `run`.
+- Trimming: `head` and `tail` from the header, overridden per call with options before the script name: `canif auto --tail 80 cargo/test core`.
+- The full output of every run is written to `~/.canif/.logs/`. canif keeps the last 50 logs and deletes older ones on each run.
 - When output was trimmed, canif prints the log path so the agent can read the rest instead of re-running. Untrimmed runs print no path.
 - stdout and stderr are piped and read line by line (split on `\n`, bytes, a final unterminated line kept). Lines of both streams are merged in arrival order: that sequence is what `head` / `tail` count and what the log holds. Each printed line goes to the stream it came from.
 - canif returns when the script exits, not when its pipes close: a background process started by the script can hold them open. After exit, output is still relayed until no line arrives for 100ms.
@@ -123,14 +123,14 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 - `head` lines print live, `tail` lines at exit. Output that fits in `head` + `tail` prints whole.
 - Trimmed notice, on stderr where the gap is (after the head, before the tail): `canif: output trimmed (<dropped> of <total> lines), full log: <path>`, or `no log available` when there is no home or the log failed.
 - Log file: `<unix-millis, 20 digits>-<pid>-<name, / as _>.log`, merged lines only. Retention keeps the 50 names that sort last. A log write or prune failure prints one `canif: ` warning and never changes the exit code.
-- Header `output` values must be positive integers; 0, negatives and unknown keys are header errors. `show` prints `output: head <n>, tail <n>` (keys set only) after `source:` / `confirm:`.
+- Header `output` values must be positive integers; 0, negatives and unknown keys are header errors. `show` prints `output: head <n>, tail <n>` (keys set only) after `source:` / `risky:`.
 
 ## Miss log
 
 - `~/.canif/.misses.log`, shared by every project. One line per unknown script name or validation failure: timestamp, cwd, full argv, reason (unknown name, or the failing arg and rule).
 - Capped at the last 1000 lines.
 - Shows which scripts agents lack and which constraints are too tight.
-- Written by `run` and `confirm` only. Wrong-subcommand refusals, header errors and script failures are not misses.
+- Written by `auto` and `run` only. `auto` refusing a risky script, header errors and script failures are not misses.
 - Line format: tab-separated `<timestamp>\t<cwd>\t<name>\t<reason>\t<arg>...`, one field per argv value after the name (none when there are no args). `\`, tab, CR and LF inside a field are escaped as `\\`, `\t`, `\r`, `\n`. Timestamp: UTC `2026-09-24T13:05:09Z`. Reason: `unknown script`, or the validation error's first line (`arg `mode`: `nope` is not one of fast|slow`).
 - Cap: append, then when the file holds more than 1000 lines, write the last 1000 to a temp file in the same directory and rename it over the log. Concurrent runs are best effort.
 - A write failure prints one `canif: ` warning; output and exit code are unchanged. No home: nothing is written.
@@ -142,10 +142,10 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
   - One `<.canif path>:` header line per origin directory that has listed scripts.
   - One line per script: `  <usage line>  # <description>`, e.g. `  cargo/test <crate:core|cli> [--filter <filter>] [--release]  # Run tests of one crate`.
   - A script with an invalid header is listed as `  <name>  # invalid header, run canif check`.
-  - A `confirm: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [confirm] Deploy the app`.
-- `canif show <name>`: usage line (prefixed `canif confirm` for confirm scripts, `canif run` otherwise, as in validation errors), description, source path, `confirm: required` for confirm scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
-- `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec. Everything after the name goes to the script's arg parsing, including `--help` and `--`. Refuses `confirm: true` scripts and names `confirm`.
-- `canif confirm [--head <n>] [--tail <n>] <name> [args...]`: same as `run`, for `confirm: true` scripts only; refuses any other script.
+  - A `risky: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [risky] Deploy the app`.
+- `canif show <name>`: usage line (prefixed `canif run` for risky scripts, `canif auto` otherwise, as in validation errors), description, source path, `risky: true` for risky scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
+- `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec, for any script. Everything after the name goes to the script's arg parsing, including `--help` and `--`. The command for humans, and for risky scripts.
+- `canif auto [--head <n>] [--tail <n>] <name> [args...]`: same as `run`, but refuses `risky: true` scripts and names `canif run`. The command for allowlisting.
 - `canif misses`: the miss log grouped by script name, with counts.
 - `canif check`: validate all headers. Header errors, name conflicts, unreadable entries and invalid configs exit 1; unknown files are warnings. It reports every problem instead of stopping at the first; other commands fail on the first discovery problem.
 - `canif guide`: script authoring reference (header format, arg kinds, env, config), compiled into the binary from `src/guide.md` so it is available wherever canif is installed. Its example is parsed by a unit test.
@@ -159,8 +159,8 @@ Errors:
 ## Claude Code integration
 
 - README documents a settings snippet; canif never edits Claude Code settings itself.
-  - allow: `Bash(canif run *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`, `Bash(canif misses)`
-  - `canif confirm` is deliberately left out, so it always prompts. No subcommand may start with `run`: `Bash(canif run *)` is a plain prefix match and also approves `canif run-<anything>` (observed with `canif run-confirmed`).
+  - allow: `Bash(canif auto *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`, `Bash(canif misses)`
+  - `canif run` is deliberately left out, so risky scripts always prompt. No subcommand may start with `auto`: an allow rule is a plain prefix match, so `Bash(canif auto *)` would also approve `canif auto-<anything>` (observed with `Bash(canif run *)` approving `canif run-confirmed`).
   - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`. `Edit` rules cover every built-in file-editing tool; `**/` only matches under the current project.
 - Ask rules take precedence over allow rules and over `acceptEdits` mode; only `bypassPermissions` skips them.
 - Agents may read scripts and propose changes; writes go through user approval.

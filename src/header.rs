@@ -13,23 +13,24 @@ const FENCE: &str = "---";
 #[derive(Debug, Clone)]
 pub struct Header {
     pub description: String,
-    pub confirm: Confirm,
+    pub risk: Risk,
     pub output: Trim,
     pub args: IndexMap<String, ArgSpec>,
 }
 
-/// Whether the script runs through `canif confirm` (never allowlisted) instead of `canif run`.
+/// `risky: true` scripts are refused by `canif auto`, the allowlisted subcommand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Confirm {
-    NotRequired,
-    Required,
+pub enum Risk {
+    Routine,
+    Risky,
 }
 
-impl Confirm {
+impl Risk {
+    /// The subcommand usage lines show: `auto` whenever it accepts the script.
     pub fn subcommand(self) -> &'static str {
         match self {
-            Self::NotRequired => "run",
-            Self::Required => "confirm",
+            Self::Routine => "auto",
+            Self::Risky => "run",
         }
     }
 }
@@ -135,7 +136,7 @@ pub enum SpecError {
 struct RawHeader {
     description: String,
     #[serde(default)]
-    confirm: bool,
+    risky: bool,
     output: Option<RawOutput>,
     args: Option<IndexMap<String, RawArg>>,
 }
@@ -192,10 +193,10 @@ pub fn parse(source: &str) -> Result<Header, HeaderError> {
     };
     Ok(Header {
         description: fold(&raw.description),
-        confirm: if raw.confirm {
-            Confirm::Required
+        risk: if raw.risky {
+            Risk::Risky
         } else {
-            Confirm::NotRequired
+            Risk::Routine
         },
         output,
         args,
@@ -832,15 +833,15 @@ cargo test -p \"$CANIF_CRATE\" ${CANIF_RELEASE:+--release} -- \"${CANIF_FILTER:-
     }
 
     #[test]
-    fn confirm_defaults_to_not_required() {
+    fn risk_defaults_to_routine() {
         let header = parse("# ---\n# description: x\n# ---\n").unwrap();
-        assert_eq!(header.confirm, Confirm::NotRequired);
-        let header = parse("# ---\n# description: x\n# confirm: false\n# ---\n").unwrap();
-        assert_eq!(header.confirm, Confirm::NotRequired);
-        let header = parse("# ---\n# description: x\n# confirm: true\n# ---\n").unwrap();
-        assert_eq!(header.confirm, Confirm::Required);
+        assert_eq!(header.risk, Risk::Routine);
+        let header = parse("# ---\n# description: x\n# risky: false\n# ---\n").unwrap();
+        assert_eq!(header.risk, Risk::Routine);
+        let header = parse("# ---\n# description: x\n# risky: true\n# ---\n").unwrap();
+        assert_eq!(header.risk, Risk::Risky);
         assert!(matches!(
-            parse("# ---\n# description: x\n# confirm: maybe\n# ---\n"),
+            parse("# ---\n# description: x\n# risky: maybe\n# ---\n"),
             Err(HeaderError::Yaml(_))
         ));
     }

@@ -34,14 +34,14 @@ set -euo pipefail
 cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} -j "$CANIF_JOBS" ${CANIF_FILTER:+"$CANIF_FILTER"}
 ```
 
-Called as: `canif run cargo/test core --filter foo --release`
+Called as: `canif auto cargo/test core --filter foo --release` (agents, allowlisted) or `canif run ...` (anyone).
 
 - `description` is required. It is what `canif list <terms>` searches.
 - `description` and `help` are folded to one line (whitespace runs become one space), so `|` / `>` blocks can wrap long text.
 - Quote YAML values containing `: ` or starting with a special character: `'...'`.
 - Arg names match `[a-z][a-z0-9-]*`. Key order is the positional order.
-- `confirm: true`: the script only runs through `canif confirm <name> ...` (same args as `run`), which is not allowlisted, so every call prompts. `canif run` refuses it. Use for risky scripts (deploys, deletions).
-- `output: {head: <n>, tail: <n>}` (either key or both, positive): print only the first / last n lines of the merged stdout and stderr. The full output goes to a log under `~/.canif/.logs/`, whose path canif prints when lines were dropped. `canif run --head <n> --tail <n> <name> ...` overrides per call.
+- `risky: true`: `canif auto` refuses the script, so it only runs through `canif run`, which is not allowlisted and makes the agent frontend ask. Use for deploys, deletions, anything hard to undo.
+- `output: {head: <n>, tail: <n>}` (either key or both, positive): print only the first / last n lines of the merged stdout and stderr. The full output goes to a log under `~/.canif/.logs/`, whose path canif prints when lines were dropped. `canif auto --head <n> --tail <n> <name> ...` overrides per call.
 
 ## Arg kinds (at most one per arg)
 

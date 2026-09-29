@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::binding::{self, BindError};
 use crate::discovery::{self, Discovery, DiscoveryError, Script};
 use crate::exec::{self, ExecError};
-use crate::header::{self, ArgKind, ArgSpec, Arity, Confirm, Header, HeaderError, Presence};
+use crate::header::{self, ArgKind, ArgSpec, Arity, Header, HeaderError, Presence, Risk};
 use crate::misses;
 use crate::output::{LOGS_DIR, Trim};
 use crate::suggest;
@@ -31,9 +31,9 @@ pub enum Action {
     // Without this, a `--help` right after the name is taken by clap instead of the script.
     #[command(disable_help_flag = true)]
     Run(Invocation),
-    /// Same as `run`, for scripts whose header sets `confirm: true`.
+    /// Same as `run`, but refuses scripts whose header sets `risky: true`. Meant for allowlisting.
     #[command(disable_help_flag = true)]
-    Confirm(Invocation),
+    Auto(Invocation),
     /// Print the miss log (unknown names, validation failures) grouped by script name.
     Misses,
     /// Validate every script header and report conflicts.
@@ -96,8 +96,8 @@ pub enum CliError {
         path: PathBuf,
         source: Box<HeaderError>,
     },
-    #[error("{}", wrong_subcommand_text(name, *confirm))]
-    WrongSubcommand { name: String, confirm: Confirm },
+    #[error("script `{name}` has `risky: true`, run it with `canif run {name}`")]
+    RiskyInAuto { name: String },
     #[error(transparent)]
     Bind(#[from] BindError),
     #[error(transparent)]
@@ -121,8 +121,8 @@ pub fn execute(cli: Cli) -> Result<i32, CliError> {
             emit(&show(script, &load_header(script)?))?;
             Ok(0)
         }
-        Action::Run(invocation) => run(&invocation, Confirm::NotRequired),
-        Action::Confirm(invocation) => run(&invocation, Confirm::Required),
+        Action::Run(invocation) => run(&invocation, Mode::Any),
+        Action::Auto(invocation) => run(&invocation, Mode::Auto),
         Action::Misses => {
             emit(&misses_summary()?)?;
             Ok(0)
@@ -154,10 +154,18 @@ fn emit(text: &str) -> Result<(), CliError> {
     }
 }
 
-/// Shared by `run` and `confirm`: `invoked` is the confirm level the subcommand serves.
-fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
+/// Which scripts a run subcommand accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// `canif run`: every script.
+    Any,
+    /// `canif auto`: scripts without `risky: true`.
+    Auto,
+}
+
+fn run(invocation: &Invocation, mode: Mode) -> Result<i32, CliError> {
     let home = std::env::home_dir();
-    let result = run_script(invocation, invoked, home.as_deref());
+    let result = run_script(invocation, mode, home.as_deref());
     let miss_reason = match &result {
         Err(CliError::UnknownScript { .. }) => Some("unknown script".to_owned()),
         Err(CliError::Bind(error)) => Some(error.reason()),
@@ -174,18 +182,13 @@ fn run(invocation: &Invocation, invoked: Confirm) -> Result<i32, CliError> {
     result
 }
 
-fn run_script(
-    invocation: &Invocation,
-    invoked: Confirm,
-    home: Option<&Path>,
-) -> Result<i32, CliError> {
+fn run_script(invocation: &Invocation, mode: Mode, home: Option<&Path>) -> Result<i32, CliError> {
     let discovery = discover()?;
     let script = find(&discovery, invocation.name())?;
     let header = load_header(script)?;
-    if header.confirm != invoked {
-        return Err(CliError::WrongSubcommand {
+    if mode == Mode::Auto && header.risk == Risk::Risky {
+        return Err(CliError::RiskyInAuto {
             name: script.name.clone(),
-            confirm: header.confirm,
         });
     }
     let bindings = binding::bind(&script.name, &header, invocation.args())?;
@@ -276,16 +279,6 @@ fn unknown_script_text(name: &str, suggestion: Option<&str>) -> String {
     }
 }
 
-fn wrong_subcommand_text(name: &str, confirm: Confirm) -> String {
-    let command = format!("canif {} {name}", confirm.subcommand());
-    match confirm {
-        Confirm::Required => format!("script `{name}` has `confirm: true`, run `{command}`"),
-        Confirm::NotRequired => {
-            format!("script `{name}` does not have `confirm: true`, run `{command}`")
-        }
-    }
-}
-
 fn joined_paths(paths: &[PathBuf]) -> String {
     paths
         .iter()
@@ -320,9 +313,9 @@ fn list(discovery: &Discovery, terms: &[String]) -> String {
                 Some(header) => format!(
                     "  {}  # {}{}",
                     usage::line(&script.name, header),
-                    match header.confirm {
-                        Confirm::Required => "[confirm] ",
-                        Confirm::NotRequired => "",
+                    match header.risk {
+                        Risk::Risky => "[risky] ",
+                        Risk::Routine => "",
                     },
                     header.description
                 ),
@@ -350,8 +343,8 @@ fn show(script: &Script, header: &Header) -> String {
         format!("description: {}", header.description),
         format!("source: {}", script.path.display()),
     ];
-    if header.confirm == Confirm::Required {
-        lines.push("confirm: required".to_owned());
+    if header.risk == Risk::Risky {
+        lines.push("risky: true".to_owned());
     }
     let trim_parts: Vec<String> = [("head", header.output.head), ("tail", header.output.tail)]
         .into_iter()
@@ -496,9 +489,9 @@ mod tests {
         for bad in ["0", "-1", "abc"] {
             assert!(Cli::try_parse_from(["canif", "run", "--head", bad, "x"]).is_err());
         }
-        let cli = Cli::try_parse_from(["canif", "confirm", "--tail", "2", "x"]).unwrap();
-        let Action::Confirm(invocation) = cli.action else {
-            panic!("expected confirm");
+        let cli = Cli::try_parse_from(["canif", "auto", "--tail", "2", "x"]).unwrap();
+        let Action::Auto(invocation) = cli.action else {
+            panic!("expected auto");
         };
         assert_eq!(invocation.tail, NonZeroUsize::new(2));
     }
@@ -534,25 +527,13 @@ mod tests {
     }
 
     #[test]
-    fn confirm_parses_like_run() {
-        let cli = Cli::try_parse_from(["canif", "confirm", "x", "--help"]).unwrap();
-        let Action::Confirm(invocation) = cli.action else {
-            panic!("expected confirm");
+    fn auto_parses_like_run() {
+        let cli = Cli::try_parse_from(["canif", "auto", "x", "--help"]).unwrap();
+        let Action::Auto(invocation) = cli.action else {
+            panic!("expected auto");
         };
         assert_eq!(invocation.name(), "x");
         assert_eq!(invocation.args(), ["--help"]);
-    }
-
-    #[test]
-    fn wrong_subcommand_names_the_right_one() {
-        assert_eq!(
-            wrong_subcommand_text("deploy", Confirm::Required),
-            "script `deploy` has `confirm: true`, run `canif confirm deploy`"
-        );
-        assert_eq!(
-            wrong_subcommand_text("greet", Confirm::NotRequired),
-            "script `greet` does not have `confirm: true`, run `canif run greet`"
-        );
     }
 
     #[test]

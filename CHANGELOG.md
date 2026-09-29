@@ -5,7 +5,7 @@
 Initial release.
 
 - `canif run <name> [args...]`: validates args against the script's header, then runs it with values in `CANIF_<NAME>` env vars (and argv for the `many` arg).
-- `canif confirm <name> [args...]`: same as `run`, for scripts with `confirm: true`. Kept off the allowlist so every call prompts; `run` refuses these scripts.
+- `canif auto <name> [args...]`: same as `run`, but refuses scripts with `risky: true`. Meant for the allowlist, with `run` kept off it so risky scripts always prompt.
 - `canif list [terms...]`, `canif show <name>`, `canif check`, `canif guide`.
 - Discovery of every `.canif/` from the cwd up plus `~/.canif`, nearest wins; `root: true` stops the walk.
 - Arg kinds: `choices`, `pattern` (anchored regex), `type: int` with `min` / `max`, `type: flag`, free text. Options: `optional`, `named`, `many`, `default`, `help`.
