@@ -288,13 +288,18 @@ fn joined_paths(paths: &[PathBuf]) -> String {
 }
 
 fn list(discovery: &Discovery, terms: &[String]) -> String {
-    if discovery.scripts.is_empty() {
+    if discovery.scripts.is_empty() && discovery.shadowed.is_empty() {
         return "no .canif scripts found\n".to_owned();
     }
     let terms: Vec<String> = terms.iter().map(|term| term.to_lowercase()).collect();
     let matches = |text: &str| {
         let text = text.to_lowercase();
         terms.iter().any(|term| text.contains(term.as_str()))
+    };
+    let selected = |script: &Script, header: Option<&Header>| {
+        terms.is_empty()
+            || matches(&script.name)
+            || header.is_some_and(|header| matches(&header.description))
     };
     let mut output = String::new();
     for (origin_index, origin) in discovery.origins.iter().enumerate() {
@@ -305,8 +310,7 @@ fn list(discovery: &Discovery, terms: &[String]) -> String {
             .filter(|script| script.origin == origin_index)
         {
             let header = load_header(script).ok();
-            let description = header.as_ref().map(|header| header.description.as_str());
-            if !terms.is_empty() && !matches(&script.name) && !description.is_some_and(matches) {
+            if !selected(script, header.as_ref()) {
                 continue;
             }
             lines.push(match &header {
@@ -327,6 +331,31 @@ fn list(discovery: &Discovery, terms: &[String]) -> String {
         }
         output.push_str(&format!("{}:\n", origin.canif_dir.display()));
         for line in lines {
+            output.push_str(&line);
+            output.push('\n');
+        }
+    }
+    let shadowed: Vec<String> = discovery
+        .shadowed
+        .iter()
+        .filter(|entry| selected(&entry.script, load_header(&entry.script).ok().as_ref()))
+        .map(|entry| {
+            let by = discovery.origins[entry.by].canif_dir.display();
+            let is_conflict = discovery
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.origin == entry.by && conflict.name == entry.script.name);
+            format!(
+                "  {}  {}  (by {}{by})",
+                entry.script.name,
+                discovery.origins[entry.script.origin].canif_dir.display(),
+                if is_conflict { "conflict in " } else { "" },
+            )
+        })
+        .collect();
+    if !shadowed.is_empty() {
+        output.push_str("shadowed:\n");
+        for line in shadowed {
             output.push_str(&line);
             output.push('\n');
         }

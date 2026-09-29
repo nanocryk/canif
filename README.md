@@ -78,7 +78,8 @@ Then write your own scripts: `canif guide` prints the authoring reference.
 ## Commands
 
 ```
-canif list [terms...]   scripts with usage lines, filtered by name/description
+canif list [terms...]   scripts with usage lines, filtered by name/description,
+                        then the scripts shadowed by a nearer .canif
 canif show <name>       full arg rules and source path
 canif auto [--head <n>] [--tail <n>] <name> ...
                         validate, then run; refuses `risky: true` scripts

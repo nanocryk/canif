@@ -143,6 +143,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
   - One line per script: `  <usage line>  # <description>`, e.g. `  cargo/test <crate:core|cli> [--filter <filter>] [--release]  # Run tests of one crate`.
   - A script with an invalid header is listed as `  <name>  # invalid header, run canif check`.
   - A `risky: true` script is marked so the agent picks the right subcommand on the first call: `  deploy/prod <env:staging|prod>  # [risky] Deploy the app`.
+  - Ends with a `shadowed:` block when a script matching the terms is hidden by a same-named one in a nearer `.canif`, one line per hidden script: `  <name>  <its .canif path>  (by <winner .canif path>)`. A name hidden by a same-dir conflict reads `(by conflict in <.canif path>)`. Same-dir conflicts themselves are not shadowing: `canif check` reports them.
 - `canif show <name>`: usage line (prefixed `canif run` for risky scripts, `canif auto` otherwise, as in validation errors), description, source path, `risky: true` for risky scripts, then one line per arg: `arg <name>: <kind>, required|optional[, many][, default: ...][, help: ...]`.
 - `canif run [--head <n>] [--tail <n>] <name> [args...]`: validate, then exec, for any script. Everything after the name goes to the script's arg parsing, including `--help` and `--`. The command for humans, and for risky scripts.
 - `canif auto [--head <n>] [--tail <n>] <name> [args...]`: same as `run`, but refuses `risky: true` scripts and names `canif run`. The command for allowlisting.

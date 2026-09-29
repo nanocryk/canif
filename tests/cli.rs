@@ -198,6 +198,48 @@ fn list_without_scripts() {
 }
 
 #[test]
+fn list_ends_with_shadowed_scripts() {
+    let fixture = listed_fixture();
+    fixture.write(".canif/greet.sh", GREET);
+    fixture.write_home(".canif/cargo/test.sh", CARGO_TEST);
+    fixture.write(".canif/dup.sh", GREET);
+    fixture.write(".canif/dup.py", GREET);
+    fixture.write_home(".canif/dup.sh", GREET);
+    let canif_dir = fixture.canif_dir();
+    let home_dir = fixture.home.join(".canif");
+    let output = fixture.canif(&["list"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let expected = format!(
+        "shadowed:
+  cargo/test  {home}  (by {project})
+  dup  {home}  (by conflict in {project})
+  greet  {home}  (by {project})
+",
+        home = home_dir.display(),
+        project = canif_dir.display(),
+    );
+    let text = stdout(&output);
+    assert!(text.ends_with(&expected), "{text}");
+    assert!(
+        !text.contains(&format!("{}:\n", home_dir.display())),
+        "{text}"
+    );
+
+    let output = fixture.canif(&["list", "hello"]);
+    let expected = format!(
+        "{project}:
+  greet  # Say hello from home
+shadowed:
+  dup  {home}  (by conflict in {project})
+  greet  {home}  (by {project})
+",
+        home = home_dir.display(),
+        project = canif_dir.display(),
+    );
+    assert_eq!(stdout(&output), expected);
+}
+
+#[test]
 fn show_prints_arg_rules() {
     let fixture = listed_fixture();
     let output = fixture.canif(&["show", "echo/all"]);

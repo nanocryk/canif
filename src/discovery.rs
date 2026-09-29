@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,8 @@ pub struct Discovery {
     pub scripts: Vec<Script>,
     pub unknown: Vec<UnknownFile>,
     pub conflicts: Vec<Conflict>,
+    /// Scripts hidden by a same-named entry in a nearer dir, sorted by name then origin.
+    pub shadowed: Vec<Shadowed>,
     /// Unreadable entries and invalid configs; discovery carries on past them.
     pub problems: Vec<DiscoveryError>,
 }
@@ -60,6 +62,13 @@ pub struct Conflict {
     pub name: String,
     pub paths: Vec<PathBuf>,
     pub origin: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shadowed {
+    pub script: Script,
+    /// Index into [`Discovery::origins`] of the dir claiming the name, by a script or a conflict.
+    pub by: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,10 +131,11 @@ fn discover_in<'path>(
     }
     let config = config::Config::merge(&dir_configs);
 
-    let mut claimed = BTreeSet::new();
+    let mut claimed = BTreeMap::new();
     let mut scripts = Vec::new();
     let mut unknown = Vec::new();
     let mut conflicts = Vec::new();
+    let mut shadowed = Vec::new();
     for (origin, Origin { canif_dir, .. }) in origins.iter().enumerate() {
         let mut listing = Listing::default();
         list_dir(canif_dir, "", &config, &mut listing);
@@ -137,7 +147,7 @@ fn discover_in<'path>(
                 .map(|path| UnknownFile { path, origin }),
         );
         for (name, mut found) in listing.candidates {
-            let unclaimed = claimed.insert(name.clone());
+            let claimant = *claimed.entry(name.clone()).or_insert(origin);
             if found.len() > 1 {
                 let paths = found.into_iter().map(|(path, _)| path).collect();
                 conflicts.push(Conflict {
@@ -145,17 +155,27 @@ fn discover_in<'path>(
                     paths,
                     origin,
                 });
-            } else if unclaimed && let Some((path, extension)) = found.pop() {
-                scripts.push(Script {
+            } else if let Some((path, extension)) = found.pop() {
+                let script = Script {
                     name,
                     path,
                     extension,
                     origin,
-                });
+                };
+                if claimant == origin {
+                    scripts.push(script);
+                } else {
+                    shadowed.push(Shadowed {
+                        script,
+                        by: claimant,
+                    });
+                }
             }
         }
     }
     scripts.sort_by(|left, right| left.name.cmp(&right.name));
+    // Stable: equal names keep origin order.
+    shadowed.sort_by(|left, right| left.script.name.cmp(&right.script.name));
 
     Discovery {
         origins,
@@ -163,6 +183,7 @@ fn discover_in<'path>(
         scripts,
         unknown,
         conflicts,
+        shadowed,
         problems,
     }
 }
@@ -361,6 +382,18 @@ mod tests {
         assert_eq!(build.path, inner.join(".canif/build.py"));
         assert_eq!(build.origin, 0);
         assert_eq!(script(&discovery, "lint").origin, 1);
+        assert_eq!(
+            discovery.shadowed,
+            [Shadowed {
+                script: Script {
+                    name: "build".to_owned(),
+                    path: outer.join(".canif").join("build.sh"),
+                    extension: "sh".to_owned(),
+                    origin: 1,
+                },
+                by: 0,
+            }]
+        );
     }
 
     #[test]
@@ -511,6 +544,15 @@ mod tests {
                 ],
                 origin: 0,
             }]
+        );
+        let hidden: Vec<(&Path, usize)> = discovery
+            .shadowed
+            .iter()
+            .map(|entry| (entry.script.path.as_path(), entry.by))
+            .collect();
+        assert_eq!(
+            hidden,
+            [(outer.join(".canif").join("build.sh").as_path(), 0)]
         );
     }
 
