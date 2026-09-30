@@ -60,14 +60,16 @@ Allow canif in Claude Code, in `~/.claude/settings.json` (or a project's `.claud
     ],
     "ask": [
       "Edit(**/.canif/**)",
-      "Edit(~/.canif/**)"
+      "Edit(~/.canif/**)",
+      "Write(**/.canif/**)",
+      "Write(~/.canif/**)"
     ]
   }
 }
 ```
 
 - `canif run` is left out of `allow` on purpose: it is the only way to run `risky: true` scripts, so those always prompt.
-- The `ask` rules make every script change go through you. They win over allow rules and over `acceptEdits` mode. `Edit` rules cover every built-in file-editing tool (Write included). `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule.
+- The `ask` rules make every script change go through you. They win over allow rules and over `acceptEdits` mode. The `Write` rules are needed too: with `Edit` rules alone, Write created a new script under `.canif/` without any prompt, while Edit on an existing script did prompt. `**/.canif/**` only matches under the current project, hence the separate `~/.canif` rule.
 
 Install the agent skill, which tells the agent to look for a script before writing an ad-hoc command: copy `skill/` to `~/.claude/skills/canif/`.
 

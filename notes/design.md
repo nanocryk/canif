@@ -162,7 +162,7 @@ Errors:
 - README documents a settings snippet; canif never edits Claude Code settings itself.
   - allow: `Bash(canif auto *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`, `Bash(canif misses)`
   - `canif run` is deliberately left out, so risky scripts always prompt. No subcommand may start with `auto`: an allow rule is a plain prefix match, so `Bash(canif auto *)` would also approve `canif auto-<anything>` (observed with `Bash(canif run *)` approving `canif run-confirmed`).
-  - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`. `Edit` rules cover every built-in file-editing tool; `**/` only matches under the current project.
+  - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`, `Write(**/.canif/**)`, `Write(~/.canif/**)`. `Edit` rules alone do not cover Write creating a new file (observed: no prompt). `**/` only matches under the current project.
 - Ask rules take precedence over allow rules and over `acceptEdits` mode; only `bypassPermissions` skips them.
 - Agents may read scripts and propose changes; writes go through user approval.
 - A small agent-facing skill lives in the repo: run `canif list <terms>` before writing an ad-hoc command, plain `canif list` when exploring.
