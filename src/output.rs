@@ -1,12 +1,12 @@
 use std::collections::VecDeque;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const LOGS_DIR: &str = ".logs";
 /// After the script exits, output stops being relayed once no line arrives for this long.
@@ -118,8 +118,12 @@ pub fn relay(
     thread::spawn(move || {
         let _ = sender.send(Message::Exited(child.wait()));
     });
+    let started = Instant::now();
     let mut log = Log::open(logs_dir, script_name);
     let mut console = Console::default();
+    if let Some(path) = log.path() {
+        console.notice(&format!("canif: log {}", path.display()));
+    }
     let mut trimmer = Trimmer::new(trim);
     let mut exit = None;
     loop {
@@ -138,6 +142,9 @@ pub fn relay(
             Some(Message::Exited(result)) => exit = Some(result),
             None => break,
         }
+    }
+    if let Some(result) = &exit {
+        log.write_exit(&exit_line(result, started.elapsed()));
     }
     let log_path = log.finish();
     let trimmed = trimmer.finish();
@@ -159,6 +166,17 @@ pub fn relay(
     }
     // The waiter holds a sender until it sends, so the loop cannot end before `exit` is set.
     exit.unwrap_or_else(|| Err(io::Error::other("script exit status lost")))
+}
+
+fn exit_line(result: &io::Result<ExitStatus>, elapsed: Duration) -> String {
+    let outcome = match result {
+        Ok(status) => match status.code() {
+            Some(code) => format!("exited {code}"),
+            None => "killed by a signal".to_owned(),
+        },
+        Err(error) => format!("lost its exit status ({error})"),
+    };
+    format!("canif: {outcome} after {:.1}s\n", elapsed.as_secs_f64())
 }
 
 /// Not joined: after the script exits, a reader may block on a pipe a background process holds.
@@ -213,8 +231,11 @@ impl Console {
     }
 }
 
+/// Unbuffered, so the log of a running script can be read up to its latest line.
 struct Log {
-    file: Option<(PathBuf, BufWriter<File>)>,
+    file: Option<(PathBuf, File)>,
+    /// The last byte written was not a newline, so the exit line needs one first.
+    mid_line: bool,
     warned: bool,
 }
 
@@ -222,19 +243,34 @@ impl Log {
     fn open(dir: Option<&Path>, script_name: &str) -> Self {
         let mut log = Self {
             file: None,
+            mid_line: false,
             warned: false,
         };
         if let Some(dir) = dir {
             let path = dir.join(log_file_name(script_name));
             match create_log(dir, &path) {
-                Ok(file) => log.file = Some((path, BufWriter::new(file))),
+                Ok(file) => log.file = Some((path, file)),
                 Err(error) => log.warn(&format!("cannot write log {}: {error}", path.display())),
             }
         }
         log
     }
 
+    fn path(&self) -> Option<&Path> {
+        self.file.as_ref().map(|(path, _)| path.as_path())
+    }
+
+    fn write_exit(&mut self, line: &str) {
+        if self.mid_line {
+            self.write(b"\n");
+        }
+        self.write(line.as_bytes());
+    }
+
     fn write(&mut self, bytes: &[u8]) {
+        if let Some(last) = bytes.last() {
+            self.mid_line = *last != b'\n';
+        }
         if let Some((path, file)) = &mut self.file
             && let Err(error) = file.write_all(bytes)
         {

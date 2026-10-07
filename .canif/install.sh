@@ -6,6 +6,8 @@
 set -uo pipefail
 cd "$CANIF_PROJECT"
 bin=$(command -v canif) || bin=""
+# Git Bash resolves `canif` without the `.exe` the file has.
+[[ -n $bin && -e $bin.exe ]] && bin=$bin.exe
 # The running canif.exe cannot be overwritten on Windows, but it can be renamed.
 if [[ -n $bin && $bin == *.exe ]]; then
   rm -f "$bin.old" 2>/dev/null

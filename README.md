@@ -131,7 +131,8 @@ Run `canif check` after writing a script.
 - stdout and stderr are relayed line by line, each line to the stream it came from. Trimming counts lines over both streams merged in arrival order.
 - `--head` / `--tail` go before the script name (`canif auto --tail 80 cargo/test core`) and replace the header's value for that key. Everything after the name goes to the script.
 - `head` lines print live; `tail` lines print when the script exits. When both are set and the output fits, everything prints once.
-- Every run's full output is logged to `~/.canif/.logs/<unix-millis>-<pid>-<name>.log` (`/` in the name becomes `_`). The newest 50 logs are kept.
+- Every run's full output is logged to `~/.canif/.logs/<unix-millis>-<pid>-<name>.log` (`/` in the name becomes `_`), written line by line as it arrives. The newest 50 logs are kept.
+- canif prints `canif: log <path>` to stderr before the script starts, so an agent can read the log of a run still in progress. When the script ends, canif appends `canif: exited <code> after <seconds>s` to the log: a log without it belongs to a run still going (or killed).
 - When lines were dropped, canif prints `canif: output trimmed (<dropped> of <total> lines), full log: <path>` to stderr where the gap is, so the agent reads the log instead of re-running. A log that cannot be written prints one warning and never fails the run.
 
 ## Miss log

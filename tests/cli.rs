@@ -630,6 +630,33 @@ fn log_files(fixture: &Fixture) -> Vec<PathBuf> {
     paths
 }
 
+/// The stderr after the `canif: log <path>` line canif prints first, checked to be there.
+fn script_stderr(output: &Output) -> String {
+    let text = stderr(output);
+    let (first, rest) = text.split_once('\n').unwrap_or((&text, ""));
+    assert!(first.starts_with("canif: log "), "{text:?}");
+    rest.to_owned()
+}
+
+/// The log content before the closing exit line, checked against `code`.
+fn log_body(log: &[u8], code: i32) -> Vec<u8> {
+    let text = String::from_utf8_lossy(log);
+    let content = log
+        .strip_suffix(b"s\n")
+        .unwrap_or_else(|| panic!("{text:?}"));
+    let start = content
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |index| index + 1);
+    let prefix = format!("canif: exited {code} after ");
+    assert!(content[start..].starts_with(prefix.as_bytes()), "{text:?}");
+    log[..start].to_vec()
+}
+
+fn read_log_body(path: &Path, code: i32) -> String {
+    String::from_utf8(log_body(&fs::read(path).unwrap(), code)).unwrap()
+}
+
 /// The log path from the trimmed notice, checked against the notice format.
 fn trimmed_log_path(stderr_text: &str, dropped: usize, total: usize) -> PathBuf {
     let prefix = format!("canif: output trimmed ({dropped} of {total} lines), full log: ");
@@ -651,7 +678,7 @@ fn untrimmed_output_is_unchanged_and_logged() {
     let output = fixture.canif(&["run", "count", "3"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert_eq!(stdout(&output), numbered(1..=3));
-    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(script_stderr(&output).is_empty(), "{}", stderr(&output));
 
     let output = fixture.canif(&["run", "partial"]);
     assert_eq!(output.stdout, b"a\n\xff\nb");
@@ -664,8 +691,12 @@ fn untrimmed_output_is_unchanged_and_logged() {
             .unwrap_or_else(|| panic!("no {suffix} in {logs:?}"));
         fs::read(path).unwrap()
     };
-    assert_eq!(log_ending("-count.log"), numbered(1..=3).as_bytes());
-    assert_eq!(log_ending("-partial.log"), b"a\n\xff\nb");
+    assert_eq!(
+        log_body(&log_ending("-count.log"), 0),
+        numbered(1..=3).as_bytes()
+    );
+    // The exit line starts on its own line after an unterminated last line.
+    assert_eq!(log_body(&log_ending("-partial.log"), 0), b"a\n\xff\nb\n");
 }
 
 #[test]
@@ -682,11 +713,15 @@ fn header_tail_trims_and_prints_the_log_path() {
     assert_eq!(log.parent().unwrap(), logs_dir(&fixture));
     let name = log.file_name().unwrap().to_string_lossy().into_owned();
     assert!(name.ends_with("-sub_count.log"), "{name}");
-    assert_eq!(fs::read_to_string(&log).unwrap(), numbered(1..=20));
+    assert_eq!(read_log_body(&log, 0), numbered(1..=20));
+    assert_eq!(
+        stderr(&output).lines().next(),
+        Some(format!("canif: log {}", log.display()).as_str())
+    );
 
     let output = fixture.canif(&["run", "sub/count", "3"]);
     assert_eq!(stdout(&output), numbered(1..=3));
-    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(script_stderr(&output).is_empty(), "{}", stderr(&output));
 }
 
 #[test]
@@ -705,7 +740,7 @@ fn cli_head_overrides_header_and_keeps_its_tail() {
 
     let output = fixture.canif(&["run", "--head", "3", "--tail", "4", "count", "6"]);
     assert_eq!(stdout(&output), numbered(1..=6));
-    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(script_stderr(&output).is_empty(), "{}", stderr(&output));
 }
 
 #[test]
@@ -739,17 +774,13 @@ fn stderr_lines_stay_on_stderr() {
         script_err.iter().all(|line| line.starts_with("err")),
         "{err}"
     );
-    let mut logged: Vec<String> = fs::read_to_string(log)
-        .unwrap()
-        .lines()
-        .map(str::to_owned)
-        .collect();
+    let mut logged: Vec<String> = read_log_body(&log, 5).lines().map(str::to_owned).collect();
     logged.sort();
     assert_eq!(logged, ["err1", "err2", "out1", "out2"]);
 
     let output = fixture.canif(&["run", "--head", "4", "mixed"]);
     assert_eq!(stdout(&output), "out1\nout2\n");
-    assert_eq!(stderr(&output), "err1\nerr2\n");
+    assert_eq!(script_stderr(&output), "err1\nerr2\n");
 }
 
 #[test]
@@ -766,7 +797,7 @@ fn run_keeps_the_newest_50_logs() {
     write(&logs_dir(&fixture), "keep.txt", "not a log\n");
     let output = fixture.canif(&["run", "count", "1"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(script_stderr(&output).is_empty(), "{}", stderr(&output));
     let logs = log_files(&fixture);
     assert_eq!(logs.len(), 51);
     assert!(logs.contains(&logs_dir(&fixture).join("keep.txt")));
@@ -776,7 +807,7 @@ fn run_keeps_the_newest_50_logs() {
         .iter()
         .find(|path| path.to_string_lossy().ends_with("-count.log"))
         .unwrap();
-    assert_eq!(fs::read_to_string(newest).unwrap(), "line 1\n");
+    assert_eq!(read_log_body(newest, 0), "line 1\n");
 }
 
 #[test]
@@ -882,7 +913,12 @@ fn background_process_does_not_hold_the_run() {
     let stderr_text = fs::read_to_string(&stderr_path).unwrap();
     assert_eq!(status.code(), Some(0), "{stderr_text}");
     assert_eq!(fs::read_to_string(&stdout_path).unwrap(), "started\n");
-    assert!(stderr_text.is_empty(), "{stderr_text}");
+    assert!(
+        stderr_text
+            .lines()
+            .all(|line| line.starts_with("canif: log ")),
+        "{stderr_text}"
+    );
     assert!(elapsed.as_secs() < 10, "took {elapsed:?}");
 }
 
@@ -1055,7 +1091,7 @@ fn unwritable_miss_log_only_warns() {
 
     let output = fixture.canif(&["run", "greet"]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
-    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    assert!(script_stderr(&output).is_empty(), "{}", stderr(&output));
 }
 
 #[test]
