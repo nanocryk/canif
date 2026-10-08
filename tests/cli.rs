@@ -638,19 +638,31 @@ fn script_stderr(output: &Output) -> String {
     rest.to_owned()
 }
 
-/// The log content before the closing exit line, checked against `code`.
+/// The log lines without their elapsed-time prefix, before the closing exit line checked against `code`.
 fn log_body(log: &[u8], code: i32) -> Vec<u8> {
     let text = String::from_utf8_lossy(log);
-    let content = log
-        .strip_suffix(b"s\n")
-        .unwrap_or_else(|| panic!("{text:?}"));
-    let start = content
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map_or(0, |index| index + 1);
+    let mut lines: Vec<&[u8]> = log
+        .split_inclusive(|byte| *byte == b'\n')
+        .map(|line| strip_elapsed(line).unwrap_or_else(|| panic!("{text:?}")))
+        .collect();
+    let exit = lines.pop().unwrap_or_else(|| panic!("{text:?}"));
     let prefix = format!("canif: exited {code} after ");
-    assert!(content[start..].starts_with(prefix.as_bytes()), "{text:?}");
-    log[..start].to_vec()
+    assert!(
+        exit.starts_with(prefix.as_bytes()) && exit.ends_with(b"s\n"),
+        "{text:?}"
+    );
+    lines.concat()
+}
+
+/// The line after its `[  123.4s] ` prefix, checked to be well formed.
+fn strip_elapsed(line: &[u8]) -> Option<&[u8]> {
+    let (prefix, rest) = line.split_at_checked(11)?;
+    let seconds = std::str::from_utf8(prefix)
+        .ok()?
+        .strip_prefix('[')?
+        .strip_suffix("s] ")?;
+    seconds.trim_start().parse::<f64>().ok()?;
+    Some(rest)
 }
 
 fn read_log_body(path: &Path, code: i32) -> String {

@@ -41,7 +41,7 @@ Called as: `canif auto cargo/test core --filter foo --release` (agents, allowlis
 - Quote YAML values containing `: ` or starting with a special character: `'...'`.
 - Arg names match `[a-z][a-z0-9-]*`. Key order is the positional order.
 - `risky: true`: `canif auto` refuses the script, so it only runs through `canif run`, which is not allowlisted and makes the agent frontend ask. Use for deploys, deletions, anything hard to undo.
-- `output: {head: <n>, tail: <n>}` (either key or both, positive): print only the first / last n lines of the merged stdout and stderr. The full output goes to a log under `~/.canif/.logs/`, written live, whose path canif prints before the script starts and again when lines were dropped. The log ends with `canif: exited <code> after <seconds>s` once the script exits. A script writing a long-running tool's raw output to its own file prints that file's path first, so it lands in canif's log too. `canif auto --head <n> --tail <n> <name> ...` overrides per call.
+- `output: {head: <n>, tail: <n>}` (either key or both, positive): print only the first / last n lines of the merged stdout and stderr. The full output goes to a log under `~/.canif/.logs/`, written live with each line prefixed by the seconds since the start (`[  123.4s] `), whose path canif prints before the script starts and again when lines were dropped. The log ends with `canif: exited <code> after <seconds>s` once the script exits. A script writing a long-running tool's raw output to its own file prints that file's path first, so it lands in canif's log too. `canif auto --head <n> --tail <n> <name> ...` overrides per call.
 
 ## Arg kinds (at most one per arg)
 

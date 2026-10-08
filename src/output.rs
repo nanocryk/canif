@@ -119,7 +119,7 @@ pub fn relay(
         let _ = sender.send(Message::Exited(child.wait()));
     });
     let started = Instant::now();
-    let mut log = Log::open(logs_dir, script_name);
+    let mut log = Log::open(logs_dir, script_name, started);
     let mut console = Console::default();
     if let Some(path) = log.path() {
         console.notice(&format!("canif: log {}", path.display()));
@@ -134,7 +134,7 @@ pub fn relay(
         };
         match message {
             Some(Message::Line(stream, line)) => {
-                log.write(&line);
+                log.write_line(&line);
                 if let Some(line) = trimmer.push((stream, line)) {
                     console.write(line.0, &line.1);
                 }
@@ -144,7 +144,7 @@ pub fn relay(
         }
     }
     if let Some(result) = &exit {
-        log.write_exit(&exit_line(result, started.elapsed()));
+        log.write_line(exit_line(result, started.elapsed()).as_bytes());
     }
     let log_path = log.finish();
     let trimmed = trimmer.finish();
@@ -234,15 +234,17 @@ impl Console {
 /// Unbuffered, so the log of a running script can be read up to its latest line.
 struct Log {
     file: Option<(PathBuf, File)>,
-    /// The last byte written was not a newline, so the exit line needs one first.
+    started: Instant,
+    /// The last line written had no newline, so the next one needs one first.
     mid_line: bool,
     warned: bool,
 }
 
 impl Log {
-    fn open(dir: Option<&Path>, script_name: &str) -> Self {
+    fn open(dir: Option<&Path>, script_name: &str, started: Instant) -> Self {
         let mut log = Self {
             file: None,
+            started,
             mid_line: false,
             warned: false,
         };
@@ -260,19 +262,17 @@ impl Log {
         self.file.as_ref().map(|(path, _)| path.as_path())
     }
 
-    fn write_exit(&mut self, line: &str) {
+    /// Prefixes the line with the seconds since the start, in one write.
+    fn write_line(&mut self, line: &[u8]) {
+        let mut bytes = Vec::with_capacity(line.len() + 16);
         if self.mid_line {
-            self.write(b"\n");
+            bytes.push(b'\n');
         }
-        self.write(line.as_bytes());
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        if let Some(last) = bytes.last() {
-            self.mid_line = *last != b'\n';
-        }
+        bytes.extend_from_slice(elapsed_prefix(self.started.elapsed()).as_bytes());
+        bytes.extend_from_slice(line);
+        self.mid_line = line.last() != Some(&b'\n');
         if let Some((path, file)) = &mut self.file
-            && let Err(error) = file.write_all(bytes)
+            && let Err(error) = file.write_all(&bytes)
         {
             let message = format!("cannot write log {}: {error}", path.display());
             self.file = None;
@@ -304,6 +304,10 @@ impl Log {
             self.warned = true;
         }
     }
+}
+
+fn elapsed_prefix(elapsed: Duration) -> String {
+    format!("[{:7.1}s] ", elapsed.as_secs_f64())
 }
 
 fn create_log(dir: &Path, path: &Path) -> io::Result<File> {
@@ -434,6 +438,15 @@ mod tests {
         assert_eq!(lines_of(b"a\n"), [b"a\n"]);
         assert!(lines_of(b"").is_empty());
         assert_eq!(lines_of(b"\xff\xfe\n\x80"), [&b"\xff\xfe\n"[..], b"\x80"]);
+    }
+
+    #[test]
+    fn elapsed_prefix_pads_to_a_fixed_width() {
+        assert_eq!(elapsed_prefix(Duration::from_millis(0)), "[    0.0s] ");
+        assert_eq!(
+            elapsed_prefix(Duration::from_millis(2_412_340)),
+            "[ 2412.3s] "
+        );
     }
 
     #[test]
