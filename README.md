@@ -1,5 +1,9 @@
 # canif
 
+[![crates.io](https://img.shields.io/crates/v/canif.svg)](https://crates.io/crates/canif)
+[![CI](https://github.com/nanocryk/canif/actions/workflows/ci.yml/badge.svg)](https://github.com/nanocryk/canif/actions/workflows/ci.yml)
+[![License](https://img.shields.io/crates/l/canif.svg)](#license)
+
 Run reviewed scripts with validated arguments, so AI agents can be allowlisted on one command instead of prompting on every long shell line.
 
 ## How it works
@@ -73,7 +77,7 @@ Allow canif in Claude Code, in `~/.claude/settings.json` (or a project's `.claud
 
 Install the agent skill, which tells the agent to look for a script before writing an ad-hoc command: copy `skill/` to `~/.claude/skills/canif/`.
 
-Optionally, start from the example scripts: `cp -r examples/global/. ~/.canif/` (see [Example scripts](#example-scripts)).
+Optionally, start from the example scripts: from a clone of this repo, `cp -r examples/global/. ~/.canif/` (see [Example scripts](#example-scripts)).
 
 Then write your own scripts: `canif guide` prints the authoring reference.
 
@@ -151,18 +155,29 @@ It shows which scripts agents look for and don't find, and which arg rules are t
 
 ## Example scripts
 
-`examples/global/` is a ready-made `~/.canif`: cargo scripts that print compact summaries instead of raw output, so agents stop wrapping cargo in `grep`/`awk` pipelines.
+`examples/global/` is a ready-made `~/.canif`. The cargo scripts print compact summaries instead of raw output, so agents stop wrapping cargo in `grep`/`awk` pipelines.
 
 ```
-cargo/check [--package <package>] [--full]    one line per diagnostic, then counts
-cargo/clippy [--package <package>] [--full]   same, warnings denied
-cargo/fmt [--check]                           format, or list unformatted files
-cargo/test [--package <package>] [--filter <filter>] [--nocapture] [--full]
-                                              failures with panic messages, summed totals
-cargo/verify [--package <package>]            fmt check, clippy, tests; stops at the first failure
+cargo/check [--package <package>] [--full]     one line per diagnostic, then counts
+cargo/clippy [--package <package>] [--full]    same, warnings denied
+cargo/fmt [--check] [--lint]                   format, or list unformatted files; --lint then runs clippy
+cargo/test [--package <package>] [--filter <filter>]
+                                               failures with panic messages, summed totals
+cargo/timings [--package <package>] [--tests] [--top <top>]
+                                               slowest crates of a build, path to cargo's HTML report
+cargo/verify [--package <package>]             fmt check, clippy, tests; stops at the first failure
+git/loc [--exclude <exclude>] [--top <top>=60] lines per tracked file, then the total
+git/prune-merged [--into <into>] [--dry-run]   risky: delete local branches merged into the default branch
 ```
 
-Shared helpers live in `_lib/cargo.sh`.
+The cargo scripts keep cargo's full output in a temp file, timestamped like canif's logs, and print its path first, so a long build can be followed while it runs. Shared helpers live in `_lib/cargo.sh`. `cargo/timings` also needs Python.
+
+This repo's own [`.canif/`](.canif) holds the project scripts used to develop canif:
+
+```
+install            risky: rebuild and install canif from this repo, even while canif is running
+release <version>  risky: check version, changelog and tests, publish to crates.io, then tag
+```
 
 ## License
 

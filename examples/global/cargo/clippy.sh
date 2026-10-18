@@ -14,9 +14,9 @@ set -uo pipefail
 source "$CANIF_DIR/_lib/cargo.sh"
 
 if [[ -n "${CANIF_FULL:-}" ]]; then
-  cargo clippy "${package_args[@]}" --all-targets -- -D warnings
+  cargo clippy "${package_args[@]}" --all-targets --keep-going -- -D warnings
   exit $?
 fi
-cargo_capture clippy "${package_args[@]}" --all-targets --message-format short -- -D warnings
+cargo_capture clippy "${package_args[@]}" --all-targets --keep-going --message-format short -- -D warnings
 summarize_diagnostics
 exit "$cargo_code"

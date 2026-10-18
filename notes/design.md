@@ -93,7 +93,7 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 
 - canif never expands globs.
 - The calling shell (Claude Code's Bash tool is Git Bash, even on Windows) expands unquoted globs before canif runs, so they land in the `many` last positional. Commands are designed around that.
-- An unquoted glob does not trigger a Claude Code permission prompt under a `Bash(canif <subcommand> *)` allow rule (observed with `glob-probe src/*.rs`).
+- An unquoted glob does not trigger a Claude Code permission prompt under a `Bash(canif <subcommand> *)` allow rule.
 - An unmatched glob reaches canif literally and goes through normal validation.
 - Scripts that need a file set compute it themselves (e.g. from `git diff`) rather than taking a pattern.
 
@@ -115,14 +115,16 @@ cargo test -p "$CANIF_CRATE" ${CANIF_RELEASE:+--release} ${CANIF_FILTER:+"$CANIF
 ## Output
 
 - Trimming: `head` and `tail` from the header, overridden per call with options before the script name: `canif auto --tail 80 cargo/test core`.
-- The full output of every run is written to `~/.canif/.logs/`. canif keeps the last 50 logs and deletes older ones on each run.
-- When output was trimmed, canif prints the log path so the agent can read the rest instead of re-running. Untrimmed runs print no path.
+- The full output of every run is written live to `~/.canif/.logs/`. canif keeps the last 50 logs and deletes older ones on each run.
+- canif prints `canif: log <path>` to stderr before the script starts, so an agent can read a run still in progress. When output was trimmed, the path is printed again with the notice, so the agent reads the rest instead of re-running.
 - stdout and stderr are piped and read line by line (split on `\n`, bytes, a final unterminated line kept). Lines of both streams are merged in arrival order: that sequence is what `head` / `tail` count and what the log holds. Each printed line goes to the stream it came from.
 - canif returns when the script exits, not when its pipes close: a background process started by the script can hold them open. After exit, output is still relayed until no line arrives for 100ms.
 - On Windows the caller still waits for background processes a script leaves running: they inherit canif's own output handles.
 - `head` lines print live, `tail` lines at exit. Output that fits in `head` + `tail` prints whole.
 - Trimmed notice, on stderr where the gap is (after the head, before the tail): `canif: output trimmed (<dropped> of <total> lines), full log: <path>`, or `no log available` when there is no home or the log failed.
-- Log file: `<unix-millis, 20 digits>-<pid>-<name, / as _>.log`, merged lines only. Retention keeps the 50 names that sort last. A log write or prune failure prints one `canif: ` warning and never changes the exit code.
+- Log file: `<unix-millis, 20 digits>-<pid>-<name, / as _>.log`, merged lines only, each prefixed by the seconds since the script started (`[  123.4s] `, width 7, one decimal). A line without a trailing newline ends at the next line's prefix. The console gets lines unchanged.
+- After the script exits, the log ends with `canif: exited <code> after <seconds>s`. A log without it belongs to a run still going or killed.
+- Retention keeps the 50 names that sort last. A log write or prune failure prints one `canif: ` warning and never changes the exit code.
 - Header `output` values must be positive integers; 0, negatives and unknown keys are header errors. `show` prints `output: head <n>, tail <n>` (keys set only) after `source:` / `risky:`.
 
 ## Miss log
@@ -161,12 +163,12 @@ Errors:
 
 - README documents a settings snippet; canif never edits Claude Code settings itself.
   - allow: `Bash(canif auto *)`, `Bash(canif list*)`, `Bash(canif show *)`, `Bash(canif check)`, `Bash(canif guide)`, `Bash(canif misses)`
-  - `canif run` is deliberately left out, so risky scripts always prompt. No subcommand may start with `auto`: an allow rule is a plain prefix match, so `Bash(canif auto *)` would also approve `canif auto-<anything>` (observed with `Bash(canif run *)` approving `canif run-confirmed`).
-  - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`, `Write(**/.canif/**)`, `Write(~/.canif/**)`. `Edit` rules alone do not cover Write creating a new file (observed: no prompt). `**/` only matches under the current project.
+  - `canif run` is deliberately left out, so risky scripts always prompt. No subcommand may start with `auto`: an allow rule is a plain prefix match, so `Bash(canif auto *)` would also approve `canif auto-<anything>`.
+  - ask: `Edit(**/.canif/**)`, `Edit(~/.canif/**)`, `Write(**/.canif/**)`, `Write(~/.canif/**)`. `Edit` rules alone do not cover Write creating a new file: it runs without a prompt. `**/` only matches under the current project.
 - Ask rules take precedence over allow rules and over `acceptEdits` mode; only `bypassPermissions` skips them.
 - Agents may read scripts and propose changes; writes go through user approval.
 - A small agent-facing skill lives in the repo: run `canif list <terms>` before writing an ad-hoc command, plain `canif list` when exploring.
 
 ## Stack
 
-Rust: `clap`, `serde`, `serde-saphyr`, `regex`.
+Rust: `clap`, `serde`, `serde-saphyr`, `indexmap`, `regex`, `anyhow`, `thiserror`.

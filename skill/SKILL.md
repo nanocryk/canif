@@ -12,4 +12,5 @@ description: Use canif scripts instead of ad-hoc shell commands. TRIGGER before 
 - A validation error prints the broken rule and the usage line: fix the call and retry once. Values may not start with `-` (except ints) or contain newlines.
 - Never edit `.canif/` directly to make a call pass. When a script is missing or too narrow, propose a new or changed script to the user (`canif guide` prints the script format), then use it once added.
 - Trimmed output contains a `canif: output trimmed (...), full log: <path>` line: Read that file for the missing lines instead of re-running. `canif auto --head <n> --tail <n> <name> ...` (options before the name) changes the trimming for one call.
+- Every run starts with a `canif: log <path>` line. The log is written live and ends with `canif: exited <code> after <seconds>s`. To check a run in the background, Read that log (never `tail`, `cat` or `ls -t` on temp files): no exit line means it is still running.
 - `canif check` validates all headers after script changes.
